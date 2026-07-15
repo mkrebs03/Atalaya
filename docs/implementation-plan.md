@@ -1,0 +1,281 @@
+# Plan de implementacion
+
+Plan ordena trabajo para reducir riesgo. No reemplaza requisitos de `spec.md`.
+
+## 1. Forma de trabajo
+
+- Completar fases en orden salvo tareas puramente documentales independientes.
+- Cada cambio debe dejar rama compilable y pruebas existentes verdes.
+- Preferir slices verticales pequenos sobre crear todas las capas vacias.
+- Una fase termina solo al cumplir condiciones de salida, no al crear archivos.
+- No implementar items futuros mientras existan criterios v1 pendientes.
+- Cambios de contrato requieren actualizar documentos y pruebas en mismo cambio.
+
+Durante fase 0, establecer comandos estables:
+
+```bash
+make test
+make lint
+make build
+make test-e2e
+```
+
+Si proyecto elige otra task runner, conservar equivalentes documentados en README.
+
+## 2. Estructura inicial sugerida
+
+```text
+cmd/atalaya/
+internal/
+  agent/
+  alerts/
+  auth/
+  checks/
+  collection/
+  config/
+  crypto/
+  database/
+  httpapi/
+  notifications/
+  retention/
+  server/
+web/
+  src/
+docs/
+scripts/
+```
+
+No crear todos los paquetes vacios. Agregarlos cuando primera funcionalidad los use.
+
+## 3. Fase 0 - Bootstrap reproducible
+
+Objetivo: compilar frontend y backend en ejecutable unico reproducible.
+
+Trabajo:
+
+- Inicializar modulo Go y aplicacion Vue 3/TypeScript/Vite.
+- Configurar TypeScript estricto, lint y formato.
+- Crear CLI con `server`, `agent` y `version`, aunque agent solo pueda mostrar error
+  de no implementado durante esta fase.
+- Embebir build Vue y servir pagina inicial desde Go.
+- Agregar endpoint publico `/healthz`.
+- Agregar config de desarrollo con proxy Vite a Go.
+- Agregar tests unitarios base y smoke test del binario.
+- Configurar build cruzado Linux `amd64`/`arm64`.
+
+Condiciones de salida:
+
+- Checkout limpio puede ejecutar tests y build mediante comandos documentados.
+- Ejecutable sirve assets Vue sin Node.js instalado en runtime.
+- `/healthz` no revela detalles internos.
+- CI ejecuta lint, tests y build para cada cambio.
+
+## 4. Fase 1 - Persistencia y autenticacion
+
+Objetivo: servidor seguro con SQLite, migraciones y administrador local.
+
+Trabajo:
+
+- Abrir SQLite con pragmas definidos y migraciones versionadas.
+- Implementar clave maestra y cifrado versionado con tests.
+- Implementar `admin create` y `admin reset-password`.
+- Implementar Argon2id, sesiones hasheadas, cookies y CSRF.
+- Crear login, logout, `auth/me` y cambio de password.
+- Proteger rutas API y fallback SPA.
+- Agregar layout Vue autenticado y manejo global de 401/403.
+- Agregar headers de seguridad y request IDs.
+
+Condiciones de salida:
+
+- Base vacia migra pero permanece sin inicializar hasta ejecutar `atalaya admin create`;
+  comando crea un unico administrador con password suministrado interactivamente.
+- Usuario no autenticado solo accede assets, login y `/healthz`.
+- Reset revoca sesiones.
+- Tests cubren expiracion, CSRF, atributos cookie y redaccion de errores.
+- Clave incorrecta contra DB existente falla startup sin modificar datos.
+
+## 5. Fase 2 - Agente, enrolamiento y estado actual
+
+Objetivo: Oracle y segundo host pueden entregar snapshots autenticados.
+
+Trabajo:
+
+- Implementar recoleccion Linux de CPU, memoria, uptime, boot ID y filesystems.
+- Implementar consulta segura del estado Tailscale.
+- Implementar filtro de pseudo-filesystems y tests con fixtures Linux.
+- Implementar listener del agente y bearer por agente.
+- Implementar tokens de enrolamiento desde API/UI.
+- Implementar enrolamiento idempotente y persistencia `0600` en agente.
+- Implementar scheduler pull, timeouts, jitter y limite de concurrencia.
+- Persistir snapshot actual, fallos consecutivos y estado derivado.
+- Crear resumen y detalle de hosts responsive.
+- Permitir seleccionar/ignorar filesystems y activar/desactivar hosts.
+
+Condiciones de salida:
+
+- Token expirado, revocado o reutilizado indebidamente no enrola host.
+- Snapshot sin credencial valida responde 401 sin filtrar datos.
+- Pull exitoso muestra datos reales; tres fallos default muestran unreachable.
+- Ultimo valor stale aparece advertido, no como actual.
+- Agente funciona sin root en distribucion Linux objetivo.
+- Payload malicioso o excesivo se rechaza sin afectar scheduler.
+
+## 6. Fase 3 - Series, graficos y retencion
+
+Objetivo: historico confiable con huecos y rollups.
+
+Trabajo:
+
+- Persistir muestras crudas normalizadas durante pull.
+- Crear consultas por rango y resolucion automatica.
+- Implementar rollups horarios idempotentes.
+- Implementar retencion en lotes y marcas de progreso.
+- Exponer API de metricas con limites de rango/puntos.
+- Integrar `uPlot` mediante componente Vue con teardown correcto.
+- Mostrar rangos 24h, 7d, 30d y 90d.
+- Mostrar huecos sin interpolacion engañosa.
+
+Condiciones de salida:
+
+- Reiniciar job no duplica rollups ni elimina datos no agregados.
+- Consulta que cruza frontera raw/rollup no duplica puntos.
+- Grafico diferencia ausencia de dato de valor cero.
+- 90 dias con defaults permanece dentro de limites de respuesta definidos.
+- Tests usan reloj inyectable; no dependen de esperas reales.
+
+## 7. Fase 4 - Checks HTTP y TCP
+
+Objetivo: servicios configurables y observados desde servidor.
+
+Trabajo:
+
+- Implementar modelo/API/UI CRUD tipado de checks.
+- Implementar workers y scheduler compartiendo patrones con collection sin acoplar
+  dominios.
+- Implementar HTTP con status esperado, timeout y redirects limitados.
+- Implementar TCP connect.
+- Aplicar validacion SSRF antes de cada conexion/redirect.
+- Persistir estado, latencia, error normalizado y series.
+- Crear vistas de lista, detalle y ejecucion manual asincrona.
+
+Condiciones de salida:
+
+- Checks reales up/down actualizan UI e historico.
+- Timeout incluye DNS, connect, TLS y respuesta.
+- Metadata cloud, loopback y redirects a destinos bloqueados se rechazan.
+- Cuerpo HTTP y URLs sensibles no se persisten ni registran.
+- Desactivar check detiene scheduling sin borrar historico.
+
+## 8. Fase 5 - Alertas y Discord
+
+Objetivo: incidentes deduplicados notifican apertura y resolucion.
+
+Trabajo:
+
+- Implementar reglas host unreachable, check failed y thresholds.
+- Implementar maquina `inactive/pending/firing` y cierre de incidentes.
+- Crear UI CRUD para reglas y vistas de incidentes.
+- Implementar canales cifrados y adaptador Discord.
+- Implementar outbox, reintentos con backoff y deduplicacion.
+- Implementar test de canal asincrono.
+- Mostrar warning/critical en semaforo global.
+
+Condiciones de salida:
+
+- Pico corto no abre incidente cuando regla exige duracion.
+- Condicion sostenida abre exactamente un incidente.
+- Recuperacion cierra mismo incidente y genera una entrega por canal.
+- Reinicio entre persistencia y envio no pierde ni duplica entrega logica.
+- Webhook no aparece en API, DB en claro, logs ni errores.
+- Fallo de Discord no bloquea nuevas evaluaciones.
+
+## 9. Fase 6 - Operacion e instalador
+
+Objetivo: instalar, actualizar, respaldar y restaurar sin toolchain de desarrollo.
+
+Trabajo:
+
+- Crear units `systemd` con hardening para server y agent.
+- Crear instalador idempotente con roles y verificacion de checksum.
+- Integrar deteccion/configuracion guiada de Tailscale Serve.
+- Crear comandos de backup, restore verification y migrate.
+- Crear `atalaya verify` para validar config, schema, acceso DB y descifrado antes de
+  confirmar upgrade.
+- Crear flujo de upgrade con backup y rollback de binario.
+- Publicar artefactos `amd64`/`arm64` y checksums desde CI.
+- Documentar paths, firewall, logs, backup y limitacion watchdog.
+- Agregar pagina autenticada de estado del sistema.
+
+Condiciones de salida:
+
+- VM Linux limpia con Tailscale conectado instala server mediante un comando.
+- Segundo host instala agent y se enrola sin Go/Node/Docker.
+- Reejecutar instalador no rota claves ni borra config.
+- Backup restaurado conserva login, metricas, reglas y descifra canales.
+- Upgrade fallido restaura como unidad binario y backup pre-migracion; nunca combina
+  binario viejo con schema incompatible.
+- Upgrade solo descarta rollback despues de `/healthz` y `atalaya verify` exitosos.
+- Servicios no ejecutan como root y reinician tras reboot.
+
+## 10. Fase 7 - Cierre v1
+
+Objetivo: validar contrato completo y preparar release estable.
+
+Trabajo:
+
+- Ejecutar todos los criterios de aceptacion de `spec.md` en entorno representativo.
+- Pruebas responsive y teclado en navegadores objetivo.
+- Prueba de carga moderada con cantidad documentada de hosts, filesystems y checks.
+- Revisar accesibilidad automatizada y manual basica.
+- Revisar logs y DB buscando secretos de fixtures reales controlados.
+- Probar migracion desde primera release candidata.
+- Corregir documentacion usando instalacion desde cero, no memoria del desarrollador.
+
+Condiciones de salida:
+
+- Los 15 criterios de aceptacion tienen evidencia o prueba automatizada.
+- No quedan findings de seguridad high/critical conocidos.
+- Limitaciones conocidas aparecen en UI/documentacion apropiada.
+- Release puede instalarse y restaurarse siguiendo solo documentacion publicada.
+
+## 11. Estrategia de pruebas
+
+### Unitarias
+
+- Parsers Linux, calculos de CPU/memoria y filtros de filesystem.
+- Maquinas de estados y thresholds.
+- Crypto, tokens, redaccion y validacion SSRF.
+- Rollups y fronteras temporales.
+
+### Integracion
+
+- SQLite real temporal con migraciones.
+- HTTP handlers con servidor de prueba.
+- Agente y servidor con certificados/control de auth.
+- Discord mediante fake server que capture payloads.
+- DNS/dialers inyectados para validar SSRF sin depender de red publica.
+
+### Frontend
+
+- Componentes de estados criticos y formularios.
+- Composables API con errores 401/409/422.
+- Graficos con huecos y cambio de rango.
+- E2E para login, enrolamiento simulado, check, regla e incidente.
+
+### Sistema
+
+- Units `systemd` en VM/container de CI compatible cuando sea posible.
+- Instalacion y upgrade sobre directorios temporales o VM efimera.
+- Build y smoke test de ambas arquitecturas; ejecucion nativa donde CI lo permita.
+
+## 12. Trabajo futuro separado
+
+No mezclar con cierre v1:
+
+- Watchdog en segundo host.
+- Checks locales especificos como presencia de sesion tmux.
+- Nuevos proveedores de notificacion.
+- Paquetes distro.
+- Multiusuario o publicacion general.
+
+Cada item futuro necesita spec y criterios propios antes de implementacion.
