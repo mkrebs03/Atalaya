@@ -10,8 +10,9 @@
 - `systemd` para supervisar servidor y agentes.
 - Tailscale para conectividad privada y resolucion MagicDNS.
 
-Builds fijan Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions` y un lockfile
-npm. Tailscale es una dependencia del sistema validada por capacidades: cada release
+Builds fijan Go `1.26.5` y Node.js LTS `24.18.0` mediante `.tool-versions`; npm queda
+fijado en `11.16.0` mediante `packageManager` y el lockfile. Tailscale es una
+dependencia del sistema validada por capacidades: cada release
 prueba en CI la version estable vigente y la version mas antigua incluida en su matriz
 de compatibilidad, sin prometer un minimo global independiente de la release.
 El modulo Go canonico es `github.com/mkrebs03/atalaya`; no depende del nombre comercial
@@ -24,6 +25,12 @@ Dependencias Go fundacionales aprobadas para v1:
   `CGO_ENABLED=0` y cross-compilation sin toolchain C.
 - `golang.org/x/crypto/argon2` para passwords Argon2id.
 - `go.yaml.in/yaml/v3` para los archivos de configuracion YAML.
+
+Fase 0 fija respectivamente `v1.53.0`, `v0.54.0` y `v3.0.4`. Una prueba de
+compatibilidad ejecuta SQLite en memoria, Argon2id y decodificacion YAML estricta con
+`CGO_ENABLED=0`; el build tambien la compila, sin ejecutarla, para Linux `amd64` y
+`arm64`. Esto mantiene los pins verificables sin crear modulos productivos vacios ni
+artefactos de prueba adicionales.
 
 El resto usa biblioteca estandar salvo que una dependencia nueva reduzca riesgo o
 complejidad de forma demostrable. Toda dependencia directa queda fijada en `go.mod` y
@@ -39,8 +46,12 @@ revisada junto con su licencia y soporte de las dos arquitecturas objetivo.
 - CSS propio; no framework visual en v1.
 - Pinia solo si aparece estado global no resuelto limpiamente con composables.
 
-Vite produce assets estaticos durante build. Go los incluye con `go:embed` y sirve UI
-y API desde mismo origen. Node.js no forma parte del runtime ni del instalador.
+La base se genero con `create-vue 3.22.4`, usando TypeScript, Router, Vitest,
+Playwright, ESLint y Prettier, sin JSX, Pinia ni DevTools. Vite produce `web/dist`
+antes de cualquier test, vet o build Go que requiera el paquete `web`; Go lo incluye
+con `go:embed` y sirve UI y API desde mismo origen. Node.js no forma parte del runtime
+ni del instalador. La instalacion npm usa un stamp derivado del manifiesto, lockfile y
+toolchain; no usa hooks de lifecycle para modificar el arbol de dependencias.
 
 ## 2. Topologia v1
 

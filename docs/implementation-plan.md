@@ -20,16 +20,21 @@ make build
 make test-e2e
 ```
 
-Fase 0 tambien fija Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions`,
-lockfile npm, Vitest para tests frontend, Playwright para E2E, y ESLint con
+Fase 0 tambien fija Go `1.26.5`, Node.js LTS `24.18.0`, npm `11.16.0` y
+`create-vue 3.22.4` mediante `.tool-versions`, `packageManager` y lockfile npm. Usa
+Vitest para tests frontend, Playwright para E2E, y ESLint con
 `eslint-plugin-vue` mas Prettier para lint y formato frontend. El CI en GitHub Actions
 usa las versiones fijadas y `make` delega a los mismos comandos
 locales. Si el proyecto cambia de task runner, conserva equivalentes documentados en
 README.
 
-Dependencias Go iniciales quedan limitadas a `modernc.org/sqlite`,
-`golang.org/x/crypto/argon2` y `go.yaml.in/yaml/v3`. Se fijan en `go.mod`, se revisan
-licencias y se prueba build `CGO_ENABLED=0` para ambas arquitecturas.
+Dependencias Go iniciales quedan limitadas a `modernc.org/sqlite v1.53.0`,
+`golang.org/x/crypto v0.54.0` y `go.yaml.in/yaml/v3 v3.0.4`. Se fijan en `go.mod`, se
+revisan licencias y se prueba build `CGO_ENABLED=0` para ambas arquitecturas. Mientras
+Fase 0 aun no las consume en produccion, una prueba de compatibilidad abre SQLite en
+memoria, deriva Argon2id y decodifica YAML con campos conocidos estrictos. `make build`
+compila esa prueba para Linux `amd64` y `arm64` con `-exec=true`, sin ejecutar el
+binario cruzado ni conservarlo como entregable.
 
 ## 2. Estructura inicial sugerida
 
@@ -68,11 +73,17 @@ Trabajo:
 - Crear CLI con `server`, `agent` y `version`, aunque agent solo pueda mostrar error
   de no implementado durante esta fase.
 - Reservar comandos `backup` y `verify` con ayuda y codigos de salida estables.
-- Embebir build Vue y servir pagina inicial desde Go.
+- Fijar codigos CLI: `0` para exito/ayuda/version, `1` para fallo operativo o comando
+  reservado no implementado y `2` para uso/configuracion invalida.
+- Embebir `web/dist` y servir pagina inicial desde Go. El frontend se compila antes de
+  tests, vet y builds Go porque `go:embed` exige que el directorio exista.
 - Agregar endpoint publico `/healthz`.
 - Agregar config de desarrollo con proxy Vite a Go y modo `development` explicito. La
   cookie puede omitir `Secure` solo con listener y origen HTTP en loopback; cualquier
   otro entorno falla startup.
+- Limitar el listener HTTP Go a loopback en todos los modos. Produccion exige origen
+  HTTPS y development permite origen HTTP solo en loopback; errores de URL no repiten
+  el valor recibido.
 - Agregar tests unitarios base y smoke test del binario.
 - Configurar build cruzado Linux `amd64`/`arm64`.
 
@@ -82,6 +93,10 @@ Condiciones de salida:
 - Ejecutable sirve assets Vue sin Node.js instalado en runtime.
 - `/healthz` no revela detalles internos.
 - CI ejecuta lint, tests y build para cada cambio.
+
+La matriz Tailscale se difiere hasta la fase de instalacion y release, cuando existan
+la deteccion de capacidades, unidades y rutas 443/9474 que debe comprobar. Fase 0 no
+publica un job ficticio sin comportamiento Tailscale implementado.
 
 ## 4. Fase 1 - Persistencia y autenticacion
 

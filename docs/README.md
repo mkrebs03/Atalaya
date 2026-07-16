@@ -10,6 +10,8 @@
   backup y actualizacion.
 - [Plan de implementacion](implementation-plan.md): fases, dependencias y condiciones
   de salida.
+- [Dependencias de runtime y fundacionales](dependencies.md): versiones directas y
+  licencias.
 
 ## Autoridad
 

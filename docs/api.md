@@ -74,6 +74,12 @@ hostname, metricas o estado de base detallado.
 {"status":"ok"}
 ```
 
+La SPA solo usa fallback para `GET`/`HEAD` de rutas de interfaz sin apariencia de
+archivo. `/api/*`, assets ausentes, paths con segmentos `.` o `..` y paths de archivo
+fuera de `/assets/` responden sin HTML; asi un `favicon.ico`, script, manifest o
+traversal nunca recibe `index.html`. Assets versionados bajo `/assets/` usan cache
+inmutable y el index usa `no-cache`.
+
 ### `POST /api/v1/auth/login`
 
 Acepta username y password. Crea cookie de sesion; no devuelve bearer token.

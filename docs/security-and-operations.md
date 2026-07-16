@@ -22,8 +22,9 @@ No se promete resistir:
 
 ## 2. Red y TLS
 
-- Dashboard escucha en `127.0.0.1:8080` por default y Tailscale Serve publica HTTPS
-  443.
+- Dashboard escucha HTTP solamente en loopback en todos los modos; el default es
+  `127.0.0.1:8080` y Tailscale Serve publica HTTPS 443. Startup rechaza wildcard,
+  interfaces privadas y hosts externos antes de abrir el socket.
 - Agente escucha en `127.0.0.1:9474` y Tailscale Serve publica ese listener por HTTPS,
   en 9474 como default fijo de v1. Nunca usa `0.0.0.0` por default. El instalador
   verifica que la CLI pueda publicar simultaneamente HTTPS 443 y 9474 y falla mostrando
@@ -84,6 +85,11 @@ Produccion siempre exige origen HTTPS y cookie `Secure`. El modo explicito
 origen publico son loopback (`localhost`, `127.0.0.1` o `::1`). Startup rechaza esa
 combinacion fuera de loopback; no existe un toggle de cookie insegura en configuracion
 de produccion.
+
+La URL publica es un origen estricto: no admite userinfo, path, query, fragmento ni
+puerto explicito vacio, incluso si el delimitador de query o fragmento no tiene valor.
+Los diagnosticos de parseo no incluyen la URL recibida para evitar revelar secretos
+accidentalmente incorporados al valor.
 
 Headers minimos:
 
