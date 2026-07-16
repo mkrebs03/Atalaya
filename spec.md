@@ -27,6 +27,8 @@ no justifica agregar multiusuario ni abstracciones innecesarias en v1.
   externa en runtime. Tailscale Serve es parte requerida de conectividad Tailscale.
 - Todo acceso operativo ocurre dentro de Tailscale.
 - Tailscale limita exposicion de red, pero no reemplaza autenticacion propia.
+- Los checks solo pueden alcanzar destinos de la tailnet o CIDRs privados autorizados
+  explicitamente; destinos publicos quedan bloqueados por default.
 - Configuracion cotidiana desde UI, no editando archivos o tablas manualmente.
 - Estado desconocido o desactualizado nunca se presenta como saludable.
 - Huecos de datos deben mostrarse como huecos, no interpolarse como mediciones reales.
@@ -55,28 +57,37 @@ El sistema DEBE:
 - Descubrir filesystems automaticamente, excluyendo filesystems virtuales y
   pseudo-filesystems. El administrador puede habilitar o ignorar mounts desde UI.
 - Conservar ultimo snapshot y momento de ultima comunicacion exitosa.
-- Considerar dato stale cuando supera intervalo efectivo + timeout + 5 segundos sin
-  nueva muestra; stale produce degradacion visible.
-- Marcar un host como no disponible tras tres intervalos consecutivos sin respuesta
-  por defecto.
+- Considerar dato stale cuando `now` supera `last_success_received_at + intervalo
+  configurado + timeout + 5 segundos`. `received_at` es asignado por el servidor y
+  es la unica referencia para frescura, series y alertas.
+- Marcar un host como no disponible cuando existan tres fallos programados completados
+  y hayan transcurrido al menos tres intervalos configurados desde el ultimo exito.
+  Para un host nunca observado, el tiempo comienza en el enrolamiento. El jitter del
+  scheduler esta acotado a los 5 segundos de gracia.
 - Permitir desactivar monitoreo de un host sin eliminar su historico.
+- Permitir archivar y restaurar un host. Archivar detiene el polling y conserva
+  historico, incidentes y referencias.
 
 Un agente expone datos; el servidor central inicia la recoleccion. La comunicacion de
 control usada para enrolamiento no convierte el modelo de metricas en push.
 
 ### 4.2 Servicios
 
-El sistema DEBE permitir crear, editar, desactivar y eliminar checks desde UI.
+El sistema DEBE permitir crear, editar, desactivar, archivar y restaurar checks desde
+UI. Archivar es una baja logica y nunca elimina historico.
 
 Tipos v1:
 
-- HTTP/HTTPS: metodo `GET`, timeout configurable, rango esperado configurable y
-  valor por defecto 200-299.
+- HTTP/HTTPS: metodo `GET`, intervalo y timeout configurables, rango esperado
+  configurable y valor por defecto 200-299. Redirects estan desactivados por default;
+  si se habilitan, tienen un maximo configurable de 3.
 - TCP: apertura de conexion a host y puerto con timeout configurable.
 
 Los checks se ejecutan desde el servidor central para representar disponibilidad
-desde la tailnet, no solamente desde localhost del host destino. Cada resultado
-incluye estado, latencia, fecha y error normalizado sin secretos.
+desde la tailnet, no solamente desde localhost del host destino. Solo pueden usar
+destinos Tailscale o CIDRs privados autorizados desde settings; loopback, link-local,
+multicast, metadata y destinos publicos quedan bloqueados. Cada resultado incluye
+estado, latencia, fecha y error normalizado sin secretos.
 
 ### 4.3 Dashboard
 
@@ -112,8 +123,10 @@ El sistema DEBE:
 - Mantener huecos cuando servidor o agente no recolectaron datos.
 
 Retencion e intervalo son configurables, pero esos valores son defaults soportados y
-probados. v1 no requiere buffering local: si servidor central se detiene, se pierden
-las muestras de ese periodo.
+probados. La retencion de rollups nunca puede ser menor que la retencion raw. Las
+consultas usan ventanas semiabiertas y no duplican puntos en la frontera raw/rollup.
+v1 no requiere buffering local: si servidor central se detiene, se pierden las
+muestras de ese periodo.
 
 ### 4.5 Alertas
 
@@ -124,7 +137,7 @@ Tipos de regla v1:
 - CPU o memoria por encima de un umbral durante tiempo sostenido.
 - Filesystem por encima de un umbral configurable.
 
-Cada instancia de alerta sigue este ciclo:
+Cada evaluacion de alerta sigue este ciclo:
 
 `pending -> firing -> resolved`
 
@@ -136,6 +149,8 @@ El sistema DEBE:
 - Notificar transiciones a `firing` y `resolved`.
 - Permitir severidad `warning` o `critical`.
 - Conservar historial de incidentes aunque se elimine o desactive la regla.
+- Permitir archivar y restaurar reglas. Archivar detiene evaluaciones y resuelve el
+  incidente abierto con razon `rule_archived`.
 
 ### 4.6 Notificaciones
 
@@ -145,7 +160,14 @@ El sistema DEBE:
 - Fallar al enviar una notificacion NO DEBE bloquear evaluacion ni persistencia de
   alertas.
 - Intentos y errores de entrega deben quedar registrados.
-- Webhooks y tokens se almacenan cifrados; nunca se devuelven completos a la UI.
+- Webhooks y credenciales reutilizables se almacenan cifrados. Passwords, sesiones y
+  tokens de enrolamiento se almacenan como hashes; nunca se devuelven secretos completos
+  a la UI salvo las respuestas efimeras documentadas de creacion y enrolamiento.
+- El secreto de un token de enrolamiento solo se muestra en la respuesta de creacion,
+  una vez, y la credencial de agente solo se entrega al agente durante el enrolamiento
+  o replay exacto autorizado.
+- Permitir archivar y restaurar canales. Un canal archivado no recibe entregas nuevas,
+  pero conserva su historial.
 
 ### 4.7 Autenticacion
 
@@ -172,6 +194,8 @@ atalaya agent
 atalaya admin create
 atalaya admin reset-password
 atalaya migrate
+atalaya backup
+atalaya verify
 atalaya version
 ```
 
@@ -181,7 +205,8 @@ El instalador DEBE:
 - Verificar checksum o firma del artefacto.
 - Crear usuario, directorios y permisos restringidos.
 - Generar configuracion y clave maestra cuando corresponda.
-- Instalar y arrancar unidad `systemd` para rol server o agent.
+- Instalar y arrancar unidades `systemd` para rol server o agent. En Oracle, instalar
+  el rol server configura tambien el agente local, su credencial y su unidad.
 - Ser repetible sin destruir configuracion ni datos existentes.
 
 Tailscale instalado, autenticado y conectado es una precondicion. HTTPS se publica
@@ -237,10 +262,12 @@ v1 se considera completa cuando:
    `systemd` sin instalar runtime de desarrollo.
 2. Un administrador puede crearse y recuperar contraseña localmente.
 3. Usuario no autenticado no puede leer metricas, historico o configuracion.
-4. Oracle aparece en dashboard con CPU, memoria, uptime y filesystems reales.
+4. Una instalacion server en Oracle crea automaticamente su agente local y Oracle
+   aparece en dashboard con CPU, memoria, uptime y filesystems reales.
 5. Segundo host puede enrolarse con token temporal y comenzar a ser consultado.
 6. Detener un agente produce estado no disponible y alerta tras umbral configurado.
-7. Checks HTTP y TCP pueden gestionarse desde UI y conservan historico y latencia.
+7. Checks HTTP y TCP pueden gestionarse desde UI, respetan la politica de red y
+   conservan resultados programados, historico y latencia.
 8. Graficos distinguen datos crudos, agregados y periodos sin muestras.
 9. Reglas sostenidas transitan entre `pending`, `firing` y `resolved` sin duplicar
    incidentes.

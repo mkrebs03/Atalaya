@@ -52,6 +52,16 @@ Decisiones cerradas:
 - Pull de metricas, intervalo por defecto de 60 segundos.
 - Usuario administrador unico con auth local.
 - Discord como primer adaptador de notificacion.
+- `received_at` del servidor es la referencia unica para frescura, series y alertas.
+- `unreachable` requiere tres fallos programados y tres intervalos transcurridos.
+- `DELETE` archiva siempre los recursos configurables; no hay borrado fisico desde la
+  UI.
+- Los checks solo alcanzan Tailscale y CIDRs privados autorizados; destinos publicos
+  estan bloqueados por default.
+- Incidentes separan `state` (`open`/`resolved`) de `condition_status`
+  (`true`/`false`/`unknown`).
+- La instalacion server en Oracle configura automaticamente el agente local.
+- Toolchain de build fijado por archivos de version y lockfiles.
 
 No decidido porque no bloquea inicio:
 

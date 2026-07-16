@@ -12,6 +12,8 @@ invariantes y relaciones deben conservarse.
 - Bytes usan enteros, nunca strings formateados.
 - Entidades configurables incluyen `created_at`, `updated_at`, `version` entero
   monotono y `enabled` cuando corresponda.
+- Entidades configurables incluyen `archived_at` nullable. Archivar es baja logica; no
+  se borran fisicamente desde UI.
 - Eliminacion de configuracion puede ser logica cuando exista historico referenciado.
 - Escrituras concurrentes usan `version`; contrato HTTP esta definido en `api.md`.
 
@@ -40,6 +42,8 @@ Cambiar o resetear password revoca todas las sesiones existentes.
 - Nombre visible unico.
 - Nombre MagicDNS o URL de agente unica.
 - Estado administrativo: `pending`, `active`, `disabled`.
+- Archivado: `archived_at` nullable. Un host archivado no se agenda y solo puede
+  recuperarse mediante restauracion administrativa.
 - Estado observado derivado: `unknown`, `healthy`, `degraded`, `unreachable`.
 - Intervalo, timeout, ultimo intento, ultimo exito y fallos consecutivos.
 - Credencial de agente cifrada y version de protocolo observada.
@@ -52,7 +56,9 @@ ni cancelaciones por shutdown. No prueba si causa es host, agente, Tailscale o r
 
 - Hash del token, etiqueta opcional, expiracion y creador.
 - Un unico uso exitoso y fecha de revocacion.
-- `request_id` consumido para idempotencia.
+- `request_id`, hash del payload, `consumed_at`, `replay_until` y host enrolado para
+  idempotencia. El replay exacto recupera la credencial cifrada del host durante esa
+  ventana, sin crear otro host ni otra credencial.
 
 Token en claro se muestra una vez y nunca se persiste.
 
@@ -85,6 +91,8 @@ similares se excluyen por default. Exclusion exacta es lista versionada y testea
 
 - Nombre, tipo `http` o `tcp`, destino y host relacionado opcional.
 - Intervalo, timeout y estado administrativo.
+- Archivado: `archived_at` nullable. Un check archivado no se agenda y conserva sus
+  resultados.
 - Configuracion tipada por clase de check.
 - Estado actual derivado: `unknown`, `up`, `down`.
 - Ultimo intento, ultimo exito, latencia y error normalizado.
@@ -97,7 +105,9 @@ Series crudas separan dimensiones para consultas acotadas:
 
 - Metricas de host: CPU, memoria usada/total y uptime.
 - Metricas de filesystem: usado/total por filesystem.
-- Resultados de check: exito, latencia, categoria de error y status HTTP opcional.
+- Resultados de check: exito, latencia, categoria de error, status HTTP opcional y
+  `source` (`scheduled` o `manual`). Solo resultados scheduled alimentan estado,
+  rollups y alertas.
 
 No guardar blobs JSON completos como unica fuente historica. Snapshot original puede
 registrarse temporalmente en debug, nunca requerido para consultas.
@@ -116,6 +126,8 @@ Claves unicas impiden duplicados. Recalcular una ventana produce mismo resultado
 ### AlertRule
 
 - Nombre, tipo, target, severidad y estado administrativo.
+- Archivado: `archived_at` nullable. Archivar resuelve el incidente abierto con razon
+  `rule_archived` y detiene evaluaciones.
 - Umbral, operador, duracion sostenida y parametros propios del tipo.
 - Lista de canales destino.
 
@@ -141,6 +153,9 @@ propias para ausencia.
 
 - Regla y target capturados como referencia y snapshot de nombre.
 - Severidad.
+- Estado `open` o `resolved`.
+- `condition_status`: `true`, `false` o `unknown`. Un incidente puede estar `open` y
+  `unknown` cuando falta evidencia fresh; eso no lo resuelve.
 - `started_at`, `fired_at`, `resolved_at`.
 - Valor inicial, ultimo valor y razon de resolucion.
 
@@ -150,6 +165,8 @@ identidad y no se eliminan al borrar configuracion.
 ### NotificationChannel
 
 - Nombre, proveedor, configuracion publica y secreto cifrado.
+- Archivado: `archived_at` nullable. Un canal archivado no recibe entregas nuevas,
+  pero conserva entregas historicas.
 - Estado administrativo y ultimo test.
 - La API devuelve `secret_configured`, nunca ciphertext ni secreto.
 
@@ -180,6 +197,8 @@ active  --isolated failure-------> active/degraded
 active  --failure threshold------> active/unreachable
 active  --successful pull--------> active/healthy
 *       --admin disables---------> disabled/unknown
+*       --archive-----------------> archived/unknown
+archived --restore---------------> disabled/unknown
 ```
 
 Un pull exitoso despues de `unreachable` recupera host inmediatamente; reglas deciden
@@ -193,6 +212,8 @@ unknown --failure--> down
 up      --failure--> down
 down    --success--> up
 *       --disabled-> unknown
+*       --archive--> archived/unknown
+archived --restore-> disabled/unknown
 ```
 
 Estado actual refleja ultimo resultado. Alertas sostenidas evitan notificaciones por
@@ -211,7 +232,9 @@ firing   --condition false---------------> inactive + resolve incident
 Cada transicion a firing o resolucion crea entregas para canales configurados. Cambios
 materiales de target, tipo, operador, umbral o duracion resuelven incidente con
 `rule_changed` y reinician evaluacion. Cambios de nombre o canales no lo resuelven.
-Desactivar regla o target resuelve con `rule_disabled` o `target_disabled`.
+Desactivar regla o target resuelve con `rule_disabled` o `target_disabled`; archivar
+resuelve con `rule_archived` o `target_archived`. Datos stale o ausentes mantienen un
+incidente firing abierto con `condition_status=unknown` hasta una muestra fresh falsa.
 
 ## 4. Retencion y agregacion
 
@@ -232,7 +255,9 @@ Orden seguro del job:
 5. Eliminar datos auxiliares expirados en lotes acotados.
 
 Consultas de 24/48 horas usan crudos. Rangos mayores combinan rollups y, para tramo
-reciente aun no agregado, crudos. API debe evitar doble conteo en frontera.
+reciente aun no agregado, crudos. Las ventanas son semiabiertas y cada bucket se
+obtiene de una sola fuente para evitar doble conteo en frontera. El limite maximo de
+respuesta es 10000 puntos por serie; consultas que lo superen responden 422.
 
 ## 5. SQLite
 

@@ -102,8 +102,9 @@ no deben convertir dashboard en proxy interno arbitrario.
 - Puertos entre 1 y 65535.
 - Limitar redirects y volver a validar destino de cada redirect.
 - Bloquear loopback, link-local, multicast, unspecified y metadata cloud por default.
-- Permitir rango Tailscale `100.64.0.0/10` y direcciones publicas por default. Redes
-  privadas RFC1918 requieren CIDRs agregados desde settings autenticados.
+- Permitir rango Tailscale `100.64.0.0/10` por default. Redes privadas RFC1918
+  requieren CIDRs agregados desde settings autenticados. Direcciones publicas quedan
+  bloqueadas por default.
 - Resolver DNS y validar todas las IPs antes de conectar; mitigar DNS rebinding usando
   dialer que conecta IP validada.
 - Limitar headers, cuerpo descartado, tiempo y concurrencia.
@@ -112,6 +113,8 @@ Oracle metadata (`169.254.169.254`) permanece bloqueada siempre en v1.
 Loopback, link-local, multicast, unspecified y metadata no pueden habilitarse mediante
 CIDR. Validacion al guardar revisa sintaxis; cada ejecucion y redirect vuelve a resolver
 y exige que todas las IPs resultantes cumplan politica. Resultado mixto se rechaza.
+La misma politica se aplica a TCP y a `agent_url`; un agente solo puede anunciar un
+hostname MagicDNS o una direccion Tailscale con HTTPS valido.
 
 ## 6. Usuarios y permisos del sistema
 
@@ -163,6 +166,10 @@ Backup minimo contiene:
 - Config de arranque.
 - Version de aplicacion y schema.
 
+`atalaya backup --output <path>` produce ese conjunto de forma consistente. El comando
+no incluye secretos en texto plano fuera del archivo de clave protegido y falla si no
+puede preservar permisos.
+
 Procedimiento de restauracion:
 
 1. Detener servidor.
@@ -186,7 +193,8 @@ Release incluye:
 
 Instalador:
 
-- Acepta `server`, `agent` y `upgrade`.
+- Acepta `server`, `agent` y `upgrade`. El rol `server` en Oracle instala tambien el
+  agente local y lo registra sin token de UI.
 - Descarga por HTTPS y verifica checksum antes de reemplazar binario.
 - Usa archivos temporales y rename atomico.
 - Es idempotente y no sobrescribe secretos existentes.
@@ -198,6 +206,10 @@ Instalador:
   declarada por esa release.
 - No instala Tailscale silenciosamente.
 - No ejecuta migracion destructiva sin backup.
+
+`atalaya verify` comprueba config, schema, acceso de lectura y descifrado de secretos.
+La restauracion es un procedimiento documentado: detener servicio, restaurar DB,
+clave y config, ejecutar `atalaya verify`, y arrancar solo con una version compatible.
 
 Comando `curl | sh` puede ofrecer conveniencia, pero documentacion tambien debe mostrar
 descarga, inspeccion y ejecucion separadas.

@@ -10,7 +10,10 @@
 - IDs opacos.
 - Mutaciones UI requieren sesion y proteccion CSRF, excepto login pre-auth definido
   abajo.
-- Respuestas nunca incluyen hashes, ciphertexts, tokens ni secretos.
+- Respuestas nunca incluyen hashes, ciphertexts, tokens reutilizables ni secretos,
+  salvo las excepciones efimeras documentadas para crear un token de enrolamiento y
+  completar/repetir exactamente un enrolamiento autorizado. Esas respuestas no se
+  almacenan en frontend, logs, caches ni errores.
 
 Formato de error:
 
@@ -100,7 +103,8 @@ Respuesta exitosa mostrada una vez al agente:
 Repetir mismo `request_id` y token dentro de ventana devuelve mismo resultado de forma
 segura. Ventana dura 15 minutos desde primer consumo, aunque expiracion original ocurra
 antes. Despues, replay responde conflicto de token consumido. Implementacion debe
-limitar intentos y tamano de request.
+limitar intentos y tamano de request. El replay solo devuelve la misma credencial si
+coinciden token, `request_id` y hash del payload completo.
 
 ## 3. Auth y sesion
 
@@ -118,12 +122,19 @@ Todo recurso mutable devuelve `version` entero y header `ETag: "<version>"`. `PA
 actual; ausencia responde 428. Acciones asincronas que no editan configuracion, como
 `run` y `test`, no requieren `If-Match`.
 
+`DELETE` sobre hosts, checks, reglas y canales siempre establece `archived_at`, fija
+`enabled=false` y conserva historico, incidentes y entregas. Las listas excluyen
+recursos archivados por default. `restore` quita el archivado pero deja `enabled=false`;
+reactivar monitoreo o evaluacion requiere una accion `enable` posterior. Los tokens de
+enrolamiento usan `revoked_at` y no el ciclo de archivado.
+
 ## 4. Hosts y enrolamiento
 
 - `GET /api/v1/hosts`
 - `GET /api/v1/hosts/{id}`
 - `PATCH /api/v1/hosts/{id}`
 - `DELETE /api/v1/hosts/{id}`
+- `POST /api/v1/hosts/{id}/restore`
 - `POST /api/v1/hosts/{id}/enable`
 - `POST /api/v1/hosts/{id}/disable`
 - `GET /api/v1/hosts/{id}/filesystems`
@@ -133,19 +144,23 @@ actual; ausencia responde 428. Acciones asincronas que no editan configuracion, 
 - `GET /api/v1/enrollment-tokens`
 - `DELETE /api/v1/enrollment-tokens/{id}`
 
-Crear token devuelve secreto una vez. Listarlo despues solo muestra metadata, estado y
-expiracion.
+Crear token devuelve el secreto una vez en la respuesta autenticada. Listarlo despues
+solo muestra metadata, estado y expiracion. Esta es una excepcion a la regla general de
+secretos y el frontend solo lo conserva en memoria mientras el administrador lo copia.
 
-`DELETE /hosts/{id}` realiza baja logica si existe historico. Debe requerir confirmacion
-explicita desde UI, pero v1 no necesita reautenticacion.
+`DELETE /api/v1/hosts/{id}` siempre archiva y desactiva el host, conserva historico e
+incidentes y requiere confirmacion explicita desde UI. `restore` quita el archivado,
+pero no reactiva automaticamente el monitoreo si el administrador lo habia desactivado.
 
-Respuesta de metricas incluye resolucion real y series alineables sin inventar puntos:
+Respuesta de metricas incluye resolucion real y series alineables sin inventar puntos.
+`resolution` solicitado puede ser `auto`, `raw` u `hourly`; la respuesta siempre
+devuelve `raw` u `hourly`. Los puntos horarios representan `[timestamp, timestamp + 1h)`:
 
 ```json
 {
   "from": "2026-07-14T00:00:00Z",
   "to": "2026-07-15T00:00:00Z",
-  "resolution": "raw",
+  "resolution": "hourly",
   "series": [
     {
       "key": "cpu_used_percent",
@@ -166,11 +181,13 @@ Respuesta de metricas incluye resolucion real y series alineables sin inventar p
 }
 ```
 
-Para resolucion `raw`, `min` y `max` igualan `value`, `sample_count` vale 1 y
-`expected_sample_count` puede omitirse. Para rollup, `value` es promedio y cobertura
-permite marcar ventana parcial. Ventana sin muestras no produce punto. UI no une como
-continuos puntos separados por ventana ausente y distingue visualmente rollup parcial.
-No usar cero o `null` sintetico como medicion.
+Para resolucion `raw`, `min` y `max` igualan `value`, `sample_count` vale 1 y los
+campos de cobertura pueden omitirse. Para `hourly`, `value` es promedio y cobertura
+permite marcar ventana parcial. Ventana sin muestras no produce punto. En `auto`, cada
+bucket se obtiene de una sola fuente: rollup para ventanas completamente fuera de la
+ventana raw y raw para el tramo reciente. UI no une como continuos puntos separados
+por una ventana ausente y distingue visualmente rollup parcial. No usar cero o `null`
+sintetico como medicion.
 
 ## 5. Checks
 
@@ -181,11 +198,31 @@ No usar cero o `null` sintetico como medicion.
 - `DELETE /api/v1/checks/{id}`
 - `POST /api/v1/checks/{id}/enable`
 - `POST /api/v1/checks/{id}/disable`
+- `POST /api/v1/checks/{id}/restore`
 - `POST /api/v1/checks/{id}/run`
-- `GET /api/v1/checks/{id}/results?from=&to=&resolution=auto`
+- `GET /api/v1/checks/{id}/runs/{run_id}`
+- `GET /api/v1/checks/{id}/results?from=&to=&resolution=auto&source=scheduled`
 
-`run` programa ejecucion y devuelve `202`; no mantiene request HTTP abierto esperando
-red destino. Polling posterior obtiene resultado.
+`run` programa ejecucion y devuelve `202` con `{ "run_id": "id", "status": "queued" }`;
+no mantiene request HTTP abierto esperando red destino. El resultado se consulta por
+`run_id`. Los resultados tienen `source=scheduled|manual`; por default, `results` y
+las alertas usan solo `scheduled`. Una ejecucion manual se muestra separadamente y no
+cambia estado derivado, series programadas ni alertas. Un resultado tiene esta forma
+conceptual:
+
+```json
+{
+  "id": "opaque-id",
+  "source": "scheduled",
+  "status": "up",
+  "latency_ms": 42,
+  "received_at": "2026-07-15T12:00:00Z",
+  "error_code": null,
+  "http_status": 204
+}
+```
+
+El estado de una ejecucion asincrona es `queued`, `running`, `completed` o `failed`.
 
 Configuracion HTTP:
 
@@ -193,10 +230,12 @@ Configuracion HTTP:
 {
   "type": "http",
   "url": "https://service.tailnet.ts.net/health",
+  "interval_seconds": 60,
   "timeout_seconds": 10,
   "expected_status_min": 200,
   "expected_status_max": 299,
-  "follow_redirects": true
+  "follow_redirects": false,
+  "max_redirects": 3
 }
 ```
 
@@ -207,6 +246,7 @@ Configuracion TCP:
   "type": "tcp",
   "host": "service.tailnet.ts.net",
   "port": 5432,
+  "interval_seconds": 60,
   "timeout_seconds": 5
 }
 ```
@@ -220,6 +260,7 @@ Configuracion TCP:
 - `DELETE /api/v1/alert-rules/{id}`
 - `POST /api/v1/alert-rules/{id}/enable`
 - `POST /api/v1/alert-rules/{id}/disable`
+- `POST /api/v1/alert-rules/{id}/restore`
 - `GET /api/v1/incidents?state=&severity=&cursor=`
 - `GET /api/v1/incidents/{id}`
 
@@ -232,6 +273,10 @@ incompatibles. Tipos v1:
 - `filesystem_threshold`
 
 No existe endpoint para forzar estado de incidente. Estados derivan de evaluacion.
+La respuesta de incidente incluye `state` (`open` o `resolved`) y
+`condition_status` (`true`, `false` o `unknown`). Un incidente `open` puede tener
+condicion `unknown` cuando la evidencia esta stale o ausente; no se resuelve por falta
+de datos.
 
 Schemas de condicion:
 
@@ -257,11 +302,12 @@ consecutivo; modo attempts dispara al alcanzar cantidad indicada. No agrega otra
 duracion implicita.
 
 Reglas se evaluan despues de resultados programados, no mediante timer que reutilice
-valor viejo. Ejecucion manual de check actualiza estado/historico visible, pero no
-cuenta para alertas. Datos faltantes, stale o filesystem desaparecido rompen continuidad
-y resetean threshold `pending`; incidente ya `firing` permanece abierto como `unknown`
-hasta muestra fresh falsa. Host/check unavailable tienen reglas dedicadas. Semantica de
-edicion y desactivacion esta en modelo de dominio.
+valor viejo. Ejecucion manual de check actualiza solo su resultado manual y no cuenta
+para estado derivado, series programadas ni alertas. Datos faltantes, stale o
+filesystem desaparecido rompen continuidad y resetean threshold `pending`; incidente
+ya `firing` permanece `state=open` con `condition_status=unknown` hasta una muestra
+fresh falsa. Host/check unavailable tienen reglas dedicadas. Semantica de archivado,
+restauracion y cambios de regla esta en modelo de dominio.
 
 ## 7. Canales y entregas
 
@@ -270,8 +316,10 @@ edicion y desactivacion esta en modelo de dominio.
 - `GET /api/v1/notification-channels/{id}`
 - `PATCH /api/v1/notification-channels/{id}`
 - `DELETE /api/v1/notification-channels/{id}`
+- `POST /api/v1/notification-channels/{id}/restore`
 - `POST /api/v1/notification-channels/{id}/test`
 - `GET /api/v1/notification-deliveries?channel_id=&state=&cursor=`
+- `GET /api/v1/notification-deliveries/{id}`
 
 Crear/actualizar Discord acepta `webhook_url` como write-only. Lecturas devuelven:
 
@@ -285,7 +333,8 @@ Crear/actualizar Discord acepta `webhook_url` como write-only. Lecturas devuelve
 }
 ```
 
-`test` crea entrega persistente marcada como prueba y devuelve `202`.
+`test` crea entrega persistente marcada como prueba y devuelve `202` con
+`{ "delivery_id": "id", "status": "queued" }`. La entrega se consulta por ID.
 
 ## 8. Configuracion general
 
@@ -294,19 +343,24 @@ Crear/actualizar Discord acepta `webhook_url` como write-only. Lecturas devuelve
 - `GET /api/v1/system/status`
 
 Settings editables v1: retencion, defaults de intervalos, CIDRs privados permitidos
-para checks y zona horaria de presentacion. Base de datos sigue almacenando UTC.
+para checks y zona horaria de presentacion. Los checks solo permiten Tailscale y esos
+CIDRs; destinos publicos estan bloqueados por default. Base de datos sigue almacenando
+UTC.
 
 Rangos:
 
 - Poll/check interval: 15 a 3600 segundos.
 - Timeout: 1 a 60 segundos y siempre menor que intervalo.
 - Retencion raw: 24 horas a 30 dias.
-- Retencion rollup: 7 a 730 dias y no menor que retencion raw.
+- Retencion rollup: 7 a 730 dias y no menor que retencion raw despues de convertir
+  ambas duraciones a segundos. Por tanto, si raw supera 7 dias, el minimo efectivo de
+  rollup pasa a ser el valor de raw.
 
 Intervalos nuevos aplican al siguiente schedule. Aumentar retencion no reconstruye
 datos ya eliminados. Reducir retencion aplica en siguiente job y UI debe advertir que
 es irreversible. CIDRs se expresan en notacion CIDR y no pueden incluir rangos siempre
-bloqueados.
+bloqueados. Cada ejecucion resuelve DNS y exige que todas las IPs resultantes cumplan
+la politica; redirects HTTP se validan de nuevo.
 
 `system/status` autenticado puede incluir version, estado de jobs, tamano aproximado
 de DB y ultimo backup conocido si instalacion lo registra. No incluye secretos.

@@ -20,7 +20,11 @@ make build
 make test-e2e
 ```
 
-Si proyecto elige otra task runner, conservar equivalentes documentados en README.
+Fase 0 tambien fija Go `1.26.4` y Node.js `25.2.1` mediante `.tool-versions`, lockfile
+npm, Vitest para tests frontend, Playwright para E2E y una herramienta de lint
+frontend. El CI usa las versiones fijadas y `make` delega a los mismos comandos
+locales. Si el proyecto cambia de task runner, conserva equivalentes documentados en
+README.
 
 ## 2. Estructura inicial sugerida
 
@@ -57,6 +61,7 @@ Trabajo:
 - Configurar TypeScript estricto, lint y formato.
 - Crear CLI con `server`, `agent` y `version`, aunque agent solo pueda mostrar error
   de no implementado durante esta fase.
+- Reservar comandos `backup` y `verify` con ayuda y codigos de salida estables.
 - Embebir build Vue y servir pagina inicial desde Go.
 - Agregar endpoint publico `/healthz`.
 - Agregar config de desarrollo con proxy Vite a Go.
@@ -107,6 +112,8 @@ Trabajo:
 - Implementar tokens de enrolamiento desde API/UI.
 - Implementar enrolamiento idempotente y persistencia `0600` en agente.
 - Implementar scheduler pull, timeouts, jitter y limite de concurrencia.
+- Limitar jitter a 5 segundos y calcular frescura con `received_at` del servidor.
+- Crear bootstrap local de Oracle cuando se instala el rol server.
 - Persistir snapshot actual, fallos consecutivos y estado derivado.
 - Crear resumen y detalle de hosts responsive.
 - Permitir seleccionar/ignorar filesystems y activar/desactivar hosts.
@@ -115,7 +122,8 @@ Condiciones de salida:
 
 - Token expirado, revocado o reutilizado indebidamente no enrola host.
 - Snapshot sin credencial valida responde 401 sin filtrar datos.
-- Pull exitoso muestra datos reales; tres fallos default muestran unreachable.
+- Pull exitoso muestra datos reales; tres fallos programados y tres intervalos default
+  muestran unreachable.
 - Ultimo valor stale aparece advertido, no como actual.
 - Agente funciona sin root en distribucion Linux objetivo.
 - Payload malicioso o excesivo se rechaza sin afectar scheduler.
@@ -128,6 +136,7 @@ Trabajo:
 
 - Persistir muestras crudas normalizadas durante pull.
 - Crear consultas por rango y resolucion automatica.
+- Definir buckets horarios semiabiertos, cobertura y limite de 10000 puntos por serie.
 - Implementar rollups horarios idempotentes.
 - Implementar retencion en lotes y marcas de progreso.
 - Exponer API de metricas con limites de rango/puntos.
@@ -154,17 +163,21 @@ Trabajo:
   dominios.
 - Implementar HTTP con status esperado, timeout y redirects limitados.
 - Implementar TCP connect.
-- Aplicar validacion SSRF antes de cada conexion/redirect.
-- Persistir estado, latencia, error normalizado y series.
+- Aplicar validacion SSRF antes de cada conexion/redirect; solo Tailscale y CIDRs
+  privados autorizados, nunca destinos publicos por default.
+- Persistir resultados con `source=scheduled|manual`; manual no cambia estado, series ni
+  alertas.
 - Crear vistas de lista, detalle y ejecucion manual asincrona.
 
 Condiciones de salida:
 
 - Checks reales up/down actualizan UI e historico.
 - Timeout incluye DNS, connect, TLS y respuesta.
-- Metadata cloud, loopback y redirects a destinos bloqueados se rechazan.
+- Metadata cloud, loopback, destinos publicos y redirects a destinos bloqueados se
+  rechazan.
 - Cuerpo HTTP y URLs sensibles no se persisten ni registran.
 - Desactivar check detiene scheduling sin borrar historico.
+- `run` y `test` devuelven IDs consultables y resultados manuales quedan separados.
 
 ## 8. Fase 5 - Alertas y Discord
 
@@ -174,6 +187,7 @@ Trabajo:
 
 - Implementar reglas host unreachable, check failed y thresholds.
 - Implementar maquina `inactive/pending/firing` y cierre de incidentes.
+- Persistir `state=open|resolved` y `condition_status=true|false|unknown` en incidentes.
 - Crear UI CRUD para reglas y vistas de incidentes.
 - Implementar canales cifrados y adaptador Discord.
 - Implementar outbox, reintentos con backoff y deduplicacion.
@@ -198,7 +212,8 @@ Trabajo:
 - Crear units `systemd` con hardening para server y agent.
 - Crear instalador idempotente con roles y verificacion de checksum.
 - Integrar deteccion/configuracion guiada de Tailscale Serve.
-- Crear comandos de backup, restore verification y migrate.
+- Crear comandos `backup`, `verify` y `migrate`; documentar restauracion como
+  procedimiento operativo verificable.
 - Crear `atalaya verify` para validar config, schema, acceso DB y descifrado antes de
   confirmar upgrade.
 - Crear flujo de upgrade con backup y rollback de binario.
@@ -215,6 +230,8 @@ Condiciones de salida:
 - Upgrade fallido restaura como unidad binario y backup pre-migracion; nunca combina
   binario viejo con schema incompatible.
 - Upgrade solo descarta rollback despues de `/healthz` y `atalaya verify` exitosos.
+- `atalaya backup` crea backup consistente y la restauracion documentada pasa `verify`
+  antes de iniciar.
 - Servicios no ejecutan como root y reinician tras reboot.
 
 ## 10. Fase 7 - Cierre v1
@@ -245,15 +262,18 @@ Condiciones de salida:
 - Parsers Linux, calculos de CPU/memoria y filtros de filesystem.
 - Maquinas de estados y thresholds.
 - Crypto, tokens, redaccion y validacion SSRF.
-- Rollups y fronteras temporales.
+- Rollups, fronteras temporales, `received_at` y expiracion de frescura.
+- Archivado/restauracion y transiciones de incidentes con condicion `unknown`.
 
 ### Integracion
 
 - SQLite real temporal con migraciones.
 - HTTP handlers con servidor de prueba.
 - Agente y servidor con certificados/control de auth.
+- Enrolamiento local de Oracle y replay exacto sin duplicar host o credencial.
 - Discord mediante fake server que capture payloads.
 - DNS/dialers inyectados para validar SSRF sin depender de red publica.
+- Ejecuciones manuales separadas de resultados programados y operaciones `202` con ID.
 
 ### Frontend
 
@@ -266,6 +286,7 @@ Condiciones de salida:
 
 - Units `systemd` en VM/container de CI compatible cuando sea posible.
 - Instalacion y upgrade sobre directorios temporales o VM efimera.
+- Backup/restauracion, `verify` y rollback con schema incompatible.
 - Build y smoke test de ambas arquitecturas; ejecucion nativa donde CI lo permita.
 
 ## 12. Trabajo futuro separado

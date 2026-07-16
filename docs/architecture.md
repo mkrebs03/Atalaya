@@ -10,6 +10,10 @@
 - `systemd` para supervisar servidor y agentes.
 - Tailscale para conectividad privada y resolucion MagicDNS.
 
+Builds fijan Go `1.26.4` y Node.js `25.2.1` mediante `.tool-versions` y un lockfile
+npm. La version de Tailscale es una dependencia del sistema: el instalador detecta
+capacidades de la CLI y la version minima soportada se prueba en CI.
+
 ### Frontend
 
 - Vue 3 con Composition API.
@@ -59,6 +63,8 @@ Tailscale Serve, no al proyecto.
 Instalador configura ambas rutas cuando instala roles juntos y verifica que puerto no
 este ocupado. Sintaxis exacta de CLI debe adaptarse a version Tailscale detectada y
 probarse antes de guardar config. Trafico HTTP sin cifrar queda limitado a loopback.
+Instalar el rol server en Oracle instala tambien el agente local y genera directamente
+su credencial; no usa un token de UI ni requiere una segunda instalacion manual.
 
 ## 3. Responsabilidades
 
@@ -121,7 +127,7 @@ del modulo que los consume.
 
 ## 5. Flujo de enrolamiento
 
-1. Administrador crea token desde UI. v1 permite exactamente un enrolamiento y 15
+1. Para un host remoto, el administrador crea token desde UI. v1 permite exactamente un enrolamiento y 15
    minutos de validez.
 2. UI muestra token una sola vez.
 3. Operador instala agente indicando URL del servidor, token y nombre MagicDNS local.
@@ -135,6 +141,10 @@ del modulo que los consume.
    `GET /agent/v1/snapshot` usando esa credencial.
 10. Primer pull valido cambia host de `pending` a observado.
 
+Para Oracle, la instalacion server crea el host, credencial cifrada, configuracion del
+agente y unidad `atalaya-agent.service` dentro de una operacion local equivalente. El
+primer pull usa el mismo protocolo y cambia el host a observado.
+
 Reintentar una respuesta perdida no debe consumir varios hosts. Peticion de
 enrolamiento incluye `request_id` aleatorio persistido por agente para idempotencia.
 Solo replay con mismo token, `request_id` y payload puede recuperar respuesta; cualquier
@@ -147,7 +157,7 @@ devolver credencial.
 1. Scheduler selecciona hosts `pending` o `active` habilitados cuyo `next_poll_at`
    vencio.
 2. Reserva host para impedir pulls concurrentes dentro del proceso.
-3. Consulta snapshot con timeout menor que intervalo.
+3. Consulta snapshot con timeout menor que intervalo y jitter maximo de 5 segundos.
 4. Valida version, identidad, timestamp razonable, tipos y limites de payload.
 5. En una transaccion actualiza estado actual y agrega muestras crudas.
 6. Registra exito o fallo y calcula proximo intento con jitter pequeno.
@@ -155,13 +165,15 @@ devolver credencial.
 
 Un fallo de intento programado completado conserva ultimo snapshot e incrementa fallos
 consecutivos. Intentos manuales, schedules omitidos durante downtime y cancelaciones
-por shutdown no cuentan. Host observado pasa a `unreachable` cuando acumula tres fallos
-y edad desde ultimo exito alcanza tres intervalos; antes queda `degraded`. UI muestra
-edad del dato; nunca presenta valor anterior como actual sin advertencia.
+por shutdown no cuentan. Host observado pasa a `unreachable` solo cuando acumula tres
+fallos programados y la edad desde `last_success_received_at` alcanza tres intervalos;
+antes queda `degraded`. Para host nunca observado, la edad comienza en enrolamiento.
+UI muestra edad del dato; nunca presenta valor anterior como actual sin advertencia.
 
-Snapshot/check es fresh hasta `observed_at + interval + timeout + 5 segundos`; despues
-es stale. Cambiar intervalo aplica al siguiente schedule y recalcula limite usando
-nuevo valor, sin modificar timestamps historicos.
+Snapshot/check es fresh hasta `last_success_received_at + interval + timeout + 5
+segundos`; despues es stale. `last_success_received_at` siempre usa `received_at` del
+servidor, nunca `observed_at` del agente. Cambiar intervalo aplica al siguiente
+schedule y recalcula limite usando nuevo valor, sin modificar timestamps historicos.
 
 Scheduler v1 vive en un proceso. No se diseña coordinacion distribuida porque SQLite y
 alta disponibilidad estan fuera de alcance.
@@ -170,7 +182,8 @@ alta disponibilidad estan fuera de alcance.
 
 Checks se ejecutan en servidor, independientemente del pull de agentes.
 
-- HTTP sigue redirects solo si configuracion lo permite; default maximo 3.
+- HTTP sigue redirects solo si configuracion lo permite; estan desactivados por default
+  y el maximo es 3.
 - HTTPS valida certificados del sistema; desactivar validacion queda fuera de v1.
 - Respuesta se considera exitosa por rango HTTP configurado.
 - Cuerpo de respuesta no se persiste.
@@ -179,8 +192,10 @@ Checks se ejecutan en servidor, independientemente del pull de agentes.
 - Errores persistidos usan categorias estables: `dns`, `timeout`, `connect`, `tls`,
   `http_status`, `invalid_target`, `internal`.
 
-Targets se validan al guardar. Servidor solo permite destinos resolubles o alcanzables
-dentro de politica de red configurada; detalles en documento de seguridad.
+Targets se validan al guardar y antes de cada conexion. Servidor solo permite destinos
+Tailscale o CIDRs privados autorizados; IPs publicas quedan bloqueadas por default.
+Todas las IPs DNS deben cumplir la politica, y cada redirect se resuelve y valida de
+nuevo.
 
 ## 8. Procesamiento asincrono
 
