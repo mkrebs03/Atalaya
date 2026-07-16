@@ -16,6 +16,10 @@
   salvo las excepciones efimeras documentadas para crear un token de enrolamiento y
   completar/repetir exactamente un enrolamiento autorizado. Esas respuestas no se
   almacenan en frontend, logs, caches ni errores.
+- Todos los endpoints de autenticacion, respuestas que establecen cookies y respuestas
+  efimeras con token o credencial envian `Cache-Control: no-store`. Intermediarios no
+  deben almacenar contenido autenticado; la API puede aplicar `no-store` a todas sus
+  respuestas para mantener una politica uniforme.
 
 Formato de error:
 
@@ -158,8 +162,11 @@ pero no reactiva automaticamente el monitoreo si el administrador lo habia desac
 en caso contrario; el estado observado se recalcula con el siguiente pull.
 
 Respuesta de metricas incluye resolucion real y series alineables sin inventar puntos.
-`resolution` solicitado puede ser `auto`, `raw` u `hourly`; la respuesta siempre
-devuelve `raw` u `hourly`. Los puntos horarios representan `[timestamp, timestamp + 1h)`:
+`resolution` solicitado puede ser `auto`, `raw` u `hourly`; la respuesta devuelve
+`raw`, `hourly` o `mixed`. `mixed` solo aparece cuando `auto` combina fuentes. Cada
+punto declara su propia `resolution`, por lo que el contrato sigue siendo inequivoco
+al cruzar la frontera de retencion. Los puntos horarios representan
+`[timestamp, timestamp + 1h)`:
 
 ```json
 {
@@ -173,6 +180,7 @@ devuelve `raw` u `hourly`. Los puntos horarios representan `[timestamp, timestam
       "points": [
         {
           "timestamp": "2026-07-14T00:00:00Z",
+          "resolution": "hourly",
           "value": 12.5,
           "min": 8.1,
           "max": 18.4,
@@ -186,13 +194,18 @@ devuelve `raw` u `hourly`. Los puntos horarios representan `[timestamp, timestam
 }
 ```
 
-Para resolucion `raw`, `min` y `max` igualan `value`, `sample_count` vale 1 y los
-campos de cobertura pueden omitirse. Para `hourly`, `value` es promedio y cobertura
+Para puntos `raw`, `min` y `max` igualan `value`, `sample_count` vale 1 y los campos de
+cobertura pueden omitirse. Para puntos `hourly`, `value` es promedio y cobertura
 permite marcar ventana parcial. Ventana sin muestras no produce punto. En `auto`, cada
 bucket se obtiene de una sola fuente: rollup para ventanas completamente fuera de la
 ventana raw y raw para el tramo reciente. UI no une como continuos puntos separados
 por una ventana ausente y distingue visualmente rollup parcial. No usar cero o `null`
 sintetico como medicion.
+
+El limite es 10000 puntos por serie despues de seleccionar resolucion y combinar
+fuentes. Si cualquier serie lo supera, la consulta completa responde `422` con codigo
+`point_limit_exceeded`; no devuelve una respuesta truncada. El cliente debe acotar el
+rango o solicitar `hourly`.
 
 ## 5. Checks
 
@@ -228,6 +241,11 @@ conceptual:
 ```
 
 El estado de una ejecucion asincrona es `queued`, `running`, `completed` o `failed`.
+Las consultas historicas de resultados usan el mismo contrato `raw|hourly|mixed`, la
+resolucion por punto y el limite de 10000 puntos por serie definido para metricas.
+Series expuestas: `availability` como exitos/total por ventana y `latency_ms` con
+`value` promedio, `min` y `max`. En `raw`, cada punto es un resultado programado
+individual.
 
 Configuracion HTTP:
 
@@ -330,8 +348,10 @@ restauracion y cambios de regla esta en modelo de dominio.
 - `GET /api/v1/notification-deliveries/{id}`
 
 Crear/actualizar Discord acepta `webhook_url` como write-only. El servidor valida que
-la URL coincida con `https://discord.com/api/webhooks/...`; cualquier otro destino se
-rechaza con `422`. Lecturas devuelven:
+la URL tenga esquema `https`, hostname exacto `discord.com`, puerto vacio o 443, sin
+userinfo, query ni fragment, y path exacto `/api/webhooks/{id}/{token}` con ambos
+valores no vacios. Se usa parseo estructurado, no comparacion por prefijo; cualquier
+otro destino se rechaza con `422`. Lecturas devuelven:
 
 ```json
 {
@@ -345,6 +365,8 @@ rechaza con `422`. Lecturas devuelven:
 
 `test` crea entrega persistente marcada como prueba y devuelve `202` con
 `{ "delivery_id": "id", "status": "queued" }`. La entrega se consulta por ID.
+Entregas normales pueden terminar `skipped`; la respuesta incluye una razon estable y
+no expone configuracion secreta del canal.
 
 ## 8. Configuracion general
 
@@ -366,11 +388,13 @@ Rangos:
   ambas duraciones a segundos. Por tanto, si raw supera 7 dias, el minimo efectivo de
   rollup pasa a ser el valor de raw.
 
-Intervalos nuevos aplican al siguiente schedule. Aumentar retencion no reconstruye
-datos ya eliminados. Reducir retencion aplica en siguiente job y UI debe advertir que
-es irreversible. CIDRs se expresan en notacion CIDR y no pueden incluir rangos siempre
-bloqueados. Cada ejecucion resuelve DNS y exige que todas las IPs resultantes cumplan
-la politica; redirects HTTP se validan de nuevo.
+Intervalos nuevos aplican al primer slot que se cree despues del cambio. Cada slot
+conserva intervalo y timeout efectivos; el cambio no modifica slots ni deadlines ya
+emitidos. Aumentar
+retencion no reconstruye datos ya eliminados. Reducir retencion aplica en siguiente
+job y UI debe advertir que es irreversible. CIDRs se expresan en notacion CIDR y no
+pueden incluir rangos siempre bloqueados. Cada ejecucion resuelve DNS y exige que todas
+las IPs resultantes cumplan la politica; redirects HTTP se validan de nuevo.
 
 `system/status` autenticado puede incluir version, estado de jobs, tamano aproximado
 de DB y ultimo backup conocido si instalacion lo registra. No incluye secretos.

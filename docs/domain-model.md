@@ -47,11 +47,15 @@ autenticado puede emitir una sesion nueva para el request actual.
   recuperarse mediante restauracion administrativa.
 - Estado observado derivado: `unknown`, `healthy`, `degraded`, `unreachable`.
 - Intervalo, timeout, ultimo intento, ultimo exito y fallos consecutivos.
+- Intervalo y timeout efectivos del siguiente slot creado tras el ultimo exito, que
+  determinan la frescura, mas deadlines de los slots fallidos activos. Un cambio de
+  configuracion no reescribe esos valores.
 - Credencial de agente cifrada y version de protocolo observada.
 
-`unreachable` requiere tres intentos programados fallidos consecutivos y edad de ultimo
-exito de al menos tres intervalos. No cuentan ejecuciones manuales, schedules omitidos
-ni cancelaciones por shutdown. No prueba si causa es host, agente, Tailscale o red.
+`unreachable` requiere tres intentos programados fallidos consecutivos y alcanzar el
+deadline del tercer slot; cada slot conserva su intervalo efectivo. No cuentan
+ejecuciones manuales, schedules omitidos ni cancelaciones por shutdown. No prueba si
+causa es host, agente, Tailscale o red.
 
 ### EnrollmentToken
 
@@ -100,6 +104,18 @@ similares se excluyen por default. Exclusion exacta es lista versionada y testea
 
 Relacion con host es organizativa; check siempre se ejecuta desde servidor.
 
+### SchedulePeriod
+
+Historia de scheduling compartida por hosts y checks:
+
+- Tipo e ID del target, `starts_at`, `ends_at` nullable, intervalo y timeout efectivos.
+- Habilitar un target abre un periodo; cambiar intervalo/timeout cierra el vigente y
+  abre otro en la frontera del siguiente schedule; desactivar o archivar lo cierra.
+- Los slots nominales derivados del periodo permiten calcular deadlines y muestras
+  esperadas sin reinterpretar el pasado con configuracion actual.
+- El `deadline_at` de un slot es
+  `tiempo nominal + jitter maximo (5 segundos) + timeout efectivo`.
+
 ### MetricSample
 
 Series crudas separan dimensiones para consultas acotadas:
@@ -120,12 +136,14 @@ Por hora UTC y serie:
 
 - `min`, `max`, `avg`, `count` para valores numericos.
 - Disponibilidad como exitos/total para checks.
-- Cantidad esperada segun intervalo vigente al cierre de la ventana y flag de ventana
-  completa. Si el intervalo cambio dentro de la ventana, la cobertura usa ese valor y
-  la ventana puede quedar marcada como parcial.
+- Cantidad esperada igual al numero de slots nominales de `SchedulePeriod` dentro de la
+  ventana y flag de ventana completa. Periodos desactivados o archivados no generan
+  muestras esperadas; cada segmento usa su propio intervalo.
 - Inicio y fin de ventana.
 
 Claves unicas impiden duplicados. Recalcular una ventana produce mismo resultado.
+Si falta historia suficiente para reconstruir algun segmento, `expected_sample_count`
+se omite y `complete=false`; no se inventa cobertura.
 
 ### AlertRule
 
@@ -166,7 +184,7 @@ propias para ausencia.
 - Valor inicial, ultimo valor y razon de resolucion.
 
 Solo puede existir un incidente abierto por regla-target. Incidentes son inmutables en
-identidad y no se eliminan al borrar configuracion.
+identidad y no se eliminan al archivar configuracion.
 
 ### NotificationChannel
 
@@ -181,20 +199,29 @@ identidad y no se eliminan al borrar configuracion.
 Outbox persistente:
 
 - Incidente, transicion, canal y payload renderizable sin secreto.
-- Estado `pending`, `sending`, `delivered`, `failed`.
-- Intentos, proximo intento, ultimo error y timestamps.
+- Estado `pending`, `sending`, `delivered`, `failed`, `skipped`.
+- Intentos, proximo intento, ultimo error, razon estable de `skipped` cuando aplica y
+  timestamps.
 
 Clave unica por incidente, transicion y canal garantiza deduplicacion.
 
-Al crear entregas para una transicion, los canales archivados o desactivados se omiten
-sin crear entrega; la omision se registra en log con incidente y canal.
+Cuando un incidente entra en `firing`, captura como destinos todos los canales
+configurados en la regla. Se crea una entrega de apertura por destino: `pending` si el
+canal es elegible o `skipped` con razon estable si esta desactivado o archivado. Canales
+agregados despues no se incorporan a ese incidente.
+
+La resolucion crea entregas para exactamente el mismo snapshot de destinos. Si la
+apertura fue `skipped`, o el canal ya no es elegible, la resolucion tambien queda
+`skipped`; de otro modo puede enviarse. `skipped` es terminal y queda persistido para
+auditoria, sin intento de red.
 
 Worker toma entrega con lease de 60 segundos. `sending` con lease vencido vuelve a
 `pending`. Se realizan hasta seis intentos con backoff acotado y jitter: 5 segundos,
 30 segundos, 2 minutos, 10 minutos y 30 minutos entre intentos; `Retry-After` valido
 puede extender espera hasta 2 horas. HTTP 429 y 5xx son reintentables; errores 4xx
 permanentes terminan `failed`. Por incidente/canal, entrega `resolved` espera que
-`firing` termine `delivered` o `failed`, preservando orden.
+`firing` termine `delivered`, `failed` o `skipped`, preservando orden sin quedar
+bloqueada por una entrega inexistente.
 
 ## 3. Transiciones
 
@@ -232,8 +259,8 @@ down    --success--> up
 archived --restore-> disabled/unknown
 ```
 
-Estado actual refleja ultimo resultado. Alertas sostenidas evitan notificaciones por
-fallos breves.
+Estado actual refleja el ultimo resultado programado. Resultados manuales permanecen
+separados. Alertas sostenidas evitan notificaciones por fallos breves.
 
 ### Alertas
 
@@ -245,7 +272,8 @@ firing   --condition remains true--------> firing
 firing   --condition false---------------> inactive + resolve incident
 ```
 
-Cada transicion a firing o resolucion crea entregas para canales configurados. Cambios
+Entrar en firing captura destinos y crea las entregas de apertura; resolver usa ese
+mismo snapshot y crea entregas enviables o `skipped` segun su elegibilidad. Cambios
 materiales de target, tipo, operador, umbral o duracion resuelven incidente con
 `rule_changed` y reinician evaluacion. Cambios de nombre o canales no lo resuelven.
 Desactivar regla o target resuelve con `rule_disabled` o `target_disabled`; archivar
@@ -270,10 +298,12 @@ Orden seguro del job:
 4. Eliminar crudos anteriores a retencion solo si ventanas correspondientes existen.
 5. Eliminar datos auxiliares expirados en lotes acotados.
 
-Consultas de 24/48 horas usan crudos. Rangos mayores combinan rollups y, para tramo
-reciente aun no agregado, crudos. Las ventanas son semiabiertas y cada bucket se
-obtiene de una sola fuente para evitar doble conteo en frontera. El limite maximo de
-respuesta es 10000 puntos por serie; consultas que lo superen responden 422.
+La fuente se elige respecto del cutoff raw efectivo, no por una duracion fija de la
+consulta. El tramo anterior al cutoff usa rollups y el tramo reciente disponible usa
+crudos, incluso en una consulta de 24 o 48 horas. Las ventanas son semiabiertas y cada
+bucket se obtiene de una sola fuente para evitar doble conteo en frontera. El limite
+maximo de respuesta es 10000 puntos por serie despues de combinar fuentes; consultas
+que lo superen responden 422 sin truncar.
 
 ## 5. SQLite
 

@@ -60,12 +60,15 @@ El sistema DEBE:
   pseudo-filesystems. El administrador puede habilitar o ignorar mounts desde UI.
 - Conservar ultimo snapshot y momento de ultima comunicacion exitosa.
 - Considerar dato stale cuando `now` supera `last_success_received_at + intervalo
-  configurado + timeout + 5 segundos`. `received_at` es asignado por el servidor y
-  es la unica referencia para frescura, series y alertas.
+  efectivo + timeout efectivo + jitter maximo + 5 segundos de margen operativo`.
+  Intervalo y timeout se capturan para cada schedule y no cambian retroactivamente.
+  `received_at` es asignado por el servidor y es la unica referencia para frescura,
+  series y alertas.
 - Marcar un host como no disponible cuando existan tres fallos programados completados
-  y hayan transcurrido al menos tres intervalos configurados desde el ultimo exito.
-  Para un host nunca observado, el tiempo comienza en el enrolamiento. El jitter del
-  scheduler esta acotado a los 5 segundos de gracia.
+  y se haya alcanzado el deadline del tercer slot fallido, calculado con el intervalo
+  efectivo de cada schedule. Para un host nunca observado, el primer slot comienza en
+  el enrolamiento. El jitter del scheduler esta acotado a 5 segundos y es adicional
+  al margen operativo.
 - Permitir desactivar monitoreo de un host sin eliminar su historico.
 - Permitir archivar y restaurar un host. Archivar detiene el polling y conserva
   historico, incidentes y referencias.
@@ -147,9 +150,9 @@ El sistema DEBE:
 - Evitar alertas por picos que no cumplen duracion configurada.
 - Deduplicar notificaciones del mismo incidente.
 - Registrar inicio, cambios relevantes y resolucion.
-- Notificar transiciones a `firing` y `resolved`.
+- Notificar la apertura y resolucion del incidente.
 - Permitir severidad `warning` o `critical`.
-- Conservar historial de incidentes aunque se elimine o desactive la regla.
+- Conservar historial de incidentes aunque se archive o desactive la regla.
 - Permitir archivar y restaurar reglas. Archivar detiene evaluaciones y resuelve el
   incidente abierto con razon `rule_archived`.
 
@@ -161,9 +164,10 @@ El sistema DEBE:
 - Fallar al enviar una notificacion NO DEBE bloquear evaluacion ni persistencia de
   alertas.
 - Intentos y errores de entrega deben quedar registrados.
-- Webhooks y credenciales reutilizables se almacenan cifrados. La URL de webhook se
-  valida contra el patron del proveedor; para Discord solo se acepta
-  `https://discord.com/api/webhooks/...`.
+- Webhooks y credenciales reutilizables se almacenan cifrados. La URL se valida con un
+  parser contra el contrato del proveedor; Discord solo acepta HTTPS, host exacto
+  `discord.com` y path exacto `/api/webhooks/{id}/{token}`, sin userinfo, query,
+  fragment ni puerto distinto de 443.
 - Permitir archivar y restaurar canales. Un canal archivado no recibe entregas nuevas,
   pero conserva su historial.
 
@@ -179,7 +183,9 @@ El sistema DEBE:
 - El secreto de un token de enrolamiento solo se muestra en la respuesta de creacion,
   una vez, y la credencial de agente solo se entrega al agente durante el enrolamiento
   o replay exacto autorizado.
-- Sesiones usan cookies `HttpOnly`, `Secure` y `SameSite` apropiado.
+- Sesiones usan cookies `HttpOnly`, `Secure` y `SameSite` apropiado. La unica
+  excepcion a `Secure` es el modo `development` limitado a loopback definido en
+  [`docs/security-and-operations.md`](docs/security-and-operations.md).
 - Recuperacion de contraseña se realiza mediante comando local, no email.
 - Ninguna metrica, configuracion o dato historico es accesible sin autenticacion.
 - Endpoints tecnicos publicos solo pueden revelar disponibilidad del proceso, nunca
@@ -195,6 +201,7 @@ El mismo ejecutable PUEDE ofrecer modos y comandos como:
 ```text
 atalaya server
 atalaya agent
+atalaya bootstrap local-agent
 atalaya admin create
 atalaya admin reset-password
 atalaya migrate

@@ -27,6 +27,10 @@ fijadas y `make` delega a los mismos comandos
 locales. Si el proyecto cambia de task runner, conserva equivalentes documentados en
 README.
 
+Dependencias Go iniciales quedan limitadas a `modernc.org/sqlite`,
+`golang.org/x/crypto/argon2` y `go.yaml.in/yaml/v3`. Se fijan en `go.mod`, se revisan
+licencias y se prueba build `CGO_ENABLED=0` para ambas arquitecturas.
+
 ## 2. Estructura inicial sugerida
 
 ```text
@@ -65,7 +69,9 @@ Trabajo:
 - Reservar comandos `backup` y `verify` con ayuda y codigos de salida estables.
 - Embebir build Vue y servir pagina inicial desde Go.
 - Agregar endpoint publico `/healthz`.
-- Agregar config de desarrollo con proxy Vite a Go.
+- Agregar config de desarrollo con proxy Vite a Go y modo `development` explicito. La
+  cookie puede omitir `Secure` solo con listener y origen HTTP en loopback; cualquier
+  otro entorno falla startup.
 - Agregar tests unitarios base y smoke test del binario.
 - Configurar build cruzado Linux `amd64`/`arm64`.
 
@@ -89,7 +95,8 @@ Trabajo:
 - Crear login, logout, `auth/me` y cambio de password.
 - Proteger rutas API y fallback SPA.
 - Agregar layout Vue autenticado y manejo global de 401/403.
-- Agregar headers de seguridad y request IDs.
+- Agregar headers de seguridad, `Cache-Control: no-store` en autenticacion y respuestas
+  con secretos efimeros, y request IDs.
 
 Condiciones de salida:
 
@@ -97,7 +104,8 @@ Condiciones de salida:
   comando crea un unico administrador con password suministrado interactivamente.
 - Usuario no autenticado solo accede assets, login y `/healthz`.
 - Reset revoca sesiones.
-- Tests cubren expiracion, CSRF, atributos cookie y redaccion de errores.
+- Tests cubren expiracion, CSRF, cache headers, atributos cookie en produccion y modo
+  development limitado a loopback, y redaccion de errores.
 - Clave incorrecta contra DB existente falla startup sin modificar datos.
 
 ## 5. Fase 2 - Agente, enrolamiento y estado actual
@@ -113,8 +121,13 @@ Trabajo:
 - Implementar tokens de enrolamiento desde API/UI.
 - Implementar enrolamiento idempotente y persistencia `0600` en agente.
 - Implementar scheduler pull, timeouts, jitter y limite de concurrencia.
-- Limitar jitter a 5 segundos y calcular frescura con `received_at` del servidor.
-- Crear bootstrap local de Oracle cuando se instala el rol server.
+- Capturar intervalo/timeout por schedule, limitar jitter a 5 segundos y calcular
+  frescura con `received_at`, jitter y margen operativo adicional de 5 segundos.
+- Persistir periodos de schedule y deadlines de slots fallidos activos; el resto de
+  slots se deriva del periodo, de modo que cambios futuros no reinterpreten deadlines
+  ni cobertura historica.
+- Crear el comando idempotente `atalaya bootstrap local-agent`, independiente del
+  instalador, para crear host Oracle, credencial cifrada y config local sin token UI.
 - Persistir snapshot actual, fallos consecutivos y estado derivado.
 - Crear resumen y detalle de hosts responsive.
 - Permitir seleccionar/ignorar filesystems y activar/desactivar hosts.
@@ -123,11 +136,13 @@ Condiciones de salida:
 
 - Token expirado, revocado o reutilizado indebidamente no enrola host.
 - Snapshot sin credencial valida responde 401 sin filtrar datos.
-- Pull exitoso muestra datos reales; tres fallos programados y tres intervalos default
-  muestran unreachable.
+- Pull exitoso muestra datos reales; tres fallos programados y el deadline del tercer
+  slot fallido muestran unreachable.
 - Ultimo valor stale aparece advertido, no como actual.
 - Agente funciona sin root en distribucion Linux objetivo.
 - Payload malicioso o excesivo se rechaza sin afectar scheduler.
+- Cambiar intervalo no altera frescura ni deadlines de schedules ya creados.
+- `atalaya bootstrap local-agent` puede repetirse sin duplicar host ni rotar secreto.
 
 ## 6. Fase 3 - Series, graficos y retencion
 
@@ -136,8 +151,10 @@ Objetivo: historico confiable con huecos y rollups.
 Trabajo:
 
 - Persistir muestras crudas normalizadas durante pull.
-- Crear consultas por rango y resolucion automatica.
+- Crear consultas por rango y resolucion automatica, incluyendo `resolution=mixed` y
+  resolucion explicita por punto al cruzar el cutoff raw.
 - Definir buckets horarios semiabiertos, cobertura y limite de 10000 puntos por serie.
+- Consumir los periodos de schedule para calcular cobertura cuando cambia el intervalo.
 - Implementar rollups horarios idempotentes.
 - Implementar retencion en lotes y marcas de progreso.
 - Exponer API de metricas con limites de rango/puntos.
@@ -149,6 +166,9 @@ Condiciones de salida:
 
 - Reiniciar job no duplica rollups ni elimina datos no agregados.
 - Consulta que cruza frontera raw/rollup no duplica puntos.
+- Cambio de intervalo dentro de una hora calcula cobertura por segmentos; si falta
+  historia, omite expected count y marca rollup parcial.
+- Consulta que supera 10000 puntos en cualquier serie responde 422 sin truncar.
 - Grafico diferencia ausencia de dato de valor cero.
 - 90 dias con defaults permanece dentro de limites de respuesta definidos.
 - Tests usan reloj inyectable; no dependen de esperas reales.
@@ -178,7 +198,7 @@ Condiciones de salida:
   rechazan.
 - Cuerpo HTTP y URLs sensibles no se persisten ni registran.
 - Desactivar check detiene scheduling sin borrar historico.
-- `run` y `test` devuelven IDs consultables y resultados manuales quedan separados.
+- `run` devuelve ID consultable y resultados manuales quedan separados.
 
 ## 8. Fase 5 - Alertas y Discord
 
@@ -191,7 +211,10 @@ Trabajo:
 - Persistir `state=open|resolved` y `condition_status=true|false|unknown` en incidentes.
 - Crear UI CRUD para reglas y vistas de incidentes.
 - Implementar canales cifrados y adaptador Discord.
-- Implementar outbox, reintentos con backoff y deduplicacion.
+- Validar webhooks Discord mediante URL parseada, host y path exactos, sin userinfo,
+  query, fragment ni puerto no estandar.
+- Implementar outbox, reintentos con backoff, deduplicacion, destinos capturados al
+  abrir incidente y estado terminal `skipped`.
 - Implementar test de canal asincrono.
 - Mostrar warning/critical en semaforo global.
 
@@ -200,6 +223,8 @@ Condiciones de salida:
 - Pico corto no abre incidente cuando regla exige duracion.
 - Condicion sostenida abre exactamente un incidente.
 - Recuperacion cierra mismo incidente y genera una entrega por canal.
+- Canales agregados a mitad de incidente no reciben solo la resolucion; canales
+  inactivos producen entregas `skipped` auditables sin bloquear el orden.
 - Reinicio entre persistencia y envio no pierde ni duplica entrega logica.
 - Webhook no aparece en API, DB en claro, logs ni errores.
 - Fallo de Discord no bloquea nuevas evaluaciones.
@@ -212,7 +237,10 @@ Trabajo:
 
 - Crear units `systemd` con hardening para server y agent.
 - Crear instalador idempotente con roles y verificacion de checksum.
-- Integrar deteccion/configuracion guiada de Tailscale Serve.
+- Integrar deteccion/configuracion guiada de Tailscale Serve en 443/9474; verificar
+  rutas y fallar ante version incompatible, sin fallback silencioso de puerto.
+- Hacer que el rol server invoque `atalaya bootstrap local-agent` antes de instalar la
+  unidad local del agente.
 - Crear comandos `backup`, `verify` y `migrate`; documentar restauracion como
   procedimiento operativo verificable.
 - Crear `atalaya verify` para validar config, schema, acceso DB y descifrado antes de
@@ -263,7 +291,8 @@ Condiciones de salida:
 - Parsers Linux, calculos de CPU/memoria y filtros de filesystem.
 - Maquinas de estados y thresholds.
 - Crypto, tokens, redaccion y validacion SSRF.
-- Rollups, fronteras temporales, `received_at` y expiracion de frescura.
+- Rollups por segmentos, fronteras temporales, `received_at`, intervalo efectivo y
+  expiracion de frescura.
 - Archivado/restauracion y transiciones de incidentes con condicion `unknown`.
 
 ### Integracion
@@ -273,6 +302,7 @@ Condiciones de salida:
 - Agente y servidor con certificados/control de auth.
 - Enrolamiento local de Oracle y replay exacto sin duplicar host o credencial.
 - Discord mediante fake server que capture payloads.
+- URLs Discord malformadas o con host parecido se rechazan antes de cualquier egress.
 - DNS/dialers inyectados para validar SSRF sin depender de red publica.
 - Ejecuciones manuales separadas de resultados programados y operaciones `202` con ID.
 
@@ -280,6 +310,7 @@ Condiciones de salida:
 
 - Componentes de estados criticos y formularios.
 - Composables API con errores 401/409/422.
+- Respuestas mixtas raw/hourly y error `point_limit_exceeded`.
 - Graficos con huecos y cambio de rango.
 - E2E para login, enrolamiento simulado, check, regla e incidente.
 

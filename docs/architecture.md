@@ -14,6 +14,17 @@ Builds fijan Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions` y un 
 npm. La version de Tailscale es una dependencia del sistema: el instalador detecta
 capacidades de la CLI y la version minima soportada se prueba en CI.
 
+Dependencias Go fundacionales aprobadas para v1:
+
+- `modernc.org/sqlite`, driver SQLite pure Go para conservar builds
+  `CGO_ENABLED=0` y cross-compilation sin toolchain C.
+- `golang.org/x/crypto/argon2` para passwords Argon2id.
+- `go.yaml.in/yaml/v3` para los archivos de configuracion YAML.
+
+El resto usa biblioteca estandar salvo que una dependencia nueva reduzca riesgo o
+complejidad de forma demostrable. Toda dependencia directa queda fijada en `go.mod` y
+revisada junto con su licencia y soporte de las dos arquitecturas objetivo.
+
 ### Frontend
 
 - Vue 3 con Composition API.
@@ -60,15 +71,16 @@ en puerto 9474. El servidor consulta `https://<magicdns>:9474`. En Oracle ambas 
 coexisten: dashboard en 443 y agente en 9474. Certificados y renovacion pertenecen a
 Tailscale Serve, no al proyecto.
 
-El puerto HTTPS 9474 del agente es un default propuesto: versiones de Tailscale Serve
-restringen los puertos HTTPS publicables (historicamente 443, 8443 y 10000). El
-instalador DEBE verificar que la version instalada soporte el puerto elegido y usar
-8443 o 10000 como fallback documentado; el puerto efectivo queda registrado en la
-`agent_url` del host.
+El puerto HTTPS 9474 es el default fijo de v1 y queda registrado en `agent_url`. El
+instalador verifica que la CLI instalada admita `serve --https=9474`, configura la
+ruta y comprueba el estado efectivo; una version incompatible falla con la version
+minima requerida, sin cambiar silenciosamente de puerto.
 
-Instalador configura ambas rutas cuando instala roles juntos y verifica que puerto no
-este ocupado. Sintaxis exacta de CLI debe adaptarse a version Tailscale detectada y
-probarse antes de guardar config. Trafico HTTP sin cifrar queda limitado a loopback.
+El instalador configura ambas rutas cuando instala roles juntos y verifica que el
+listener local no este ocupado. La sintaxis exacta de CLI se adapta a la version de
+Tailscale detectada y se prueba antes de guardar config. Trafico HTTP sin cifrar queda
+limitado a loopback; el acceso HTTPS publicado se autoriza mediante ACLs/grants de la
+tailnet.
 Instalar el rol server en Oracle instala tambien el agente local y genera directamente
 su credencial; no usa un token de UI ni requiere una segunda instalacion manual.
 
@@ -147,9 +159,11 @@ del modulo que los consume.
    `GET /agent/v1/snapshot` usando esa credencial.
 10. Primer pull valido cambia host de `pending` a observado.
 
-Para Oracle, la instalacion server crea el host, credencial cifrada, configuracion del
-agente y unidad `atalaya-agent.service` dentro de una operacion local equivalente. El
-primer pull usa el mismo protocolo y cambia el host a observado.
+Para Oracle, `atalaya bootstrap local-agent` crea de forma idempotente el host,
+credencial cifrada y configuracion del agente dentro de una operacion local. El
+instalador server reutiliza ese comando y despues instala
+`atalaya-agent.service`. El primer pull usa el mismo protocolo y cambia el host a
+observado.
 
 Reintentar una respuesta perdida no debe consumir varios hosts. Peticion de
 enrolamiento incluye `request_id` aleatorio persistido por agente para idempotencia.
@@ -169,17 +183,25 @@ devolver credencial.
 6. Registra exito o fallo y calcula proximo intento con jitter pequeno.
 7. Evaluador procesa reglas relacionadas despues de persistencia.
 
-Un fallo de intento programado completado conserva ultimo snapshot e incrementa fallos
+Cada slot programado captura `effective_interval_seconds`,
+`effective_timeout_seconds`, tiempo nominal y `deadline_at` al crearse; cambios
+posteriores no alteran ese intento ni los deadlines ya calculados. Un fallo programado
+completado conserva ultimo snapshot e incrementa fallos
 consecutivos. Intentos manuales, schedules omitidos durante downtime y cancelaciones
 por shutdown no cuentan. Host observado pasa a `unreachable` solo cuando acumula tres
-fallos programados y la edad desde `last_success_received_at` alcanza tres intervalos;
-antes queda `degraded`. Para host nunca observado, la edad comienza en enrolamiento.
-UI muestra edad del dato; nunca presenta valor anterior como actual sin advertencia.
+fallos programados y se alcanza el deadline del tercer slot fallido; cada slot usa el
+intervalo que capturo al programarse. Antes queda `degraded`. Para host nunca
+observado, el primer slot parte del enrolamiento. UI muestra edad del dato; nunca
+presenta valor anterior como actual sin advertencia.
 
-Snapshot/check es fresh hasta `last_success_received_at + interval + timeout + 5
-segundos`; despues es stale. `last_success_received_at` siempre usa `received_at` del
-servidor, nunca `observed_at` del agente. Cambiar intervalo aplica al siguiente
-schedule y recalcula limite usando nuevo valor, sin modificar timestamps historicos.
+Despues de un exito, el scheduler crea el siguiente slot con la configuracion vigente.
+Snapshot/check es fresh hasta el `deadline_at` de ese siguiente slot mas 5 segundos de
+margen operativo; equivalentemente,
+`last_success_received_at + effective_interval + effective_timeout + jitter_max + 5
+segundos`, con `jitter_max` de 5 segundos. Despues es stale.
+`last_success_received_at` siempre usa `received_at` del servidor, nunca `observed_at`
+del agente. Cambiar intervalo aplica al primer slot que se cree despues del cambio; no
+modifica un slot ya creado ni recalcula frescura o timestamps historicos.
 
 Scheduler v1 vive en un proceso. No se diseña coordinacion distribuida porque SQLite y
 alta disponibilidad estan fuera de alcance.

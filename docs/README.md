@@ -53,14 +53,33 @@ Decisiones cerradas:
 - Usuario administrador unico con auth local.
 - Discord como primer adaptador de notificacion.
 - `received_at` del servidor es la referencia unica para frescura, series y alertas.
-- `unreachable` requiere tres fallos programados y tres intervalos transcurridos.
+- Scheduling por slots: cada schedule captura intervalo y timeout efectivos
+  (`SchedulePeriod`); cambios de configuracion no reinterpretan slots ya emitidos.
+- `unreachable` requiere tres fallos programados consecutivos y alcanzar el deadline
+  del tercer slot fallido.
 - `DELETE` archiva siempre los recursos configurables; no hay borrado fisico desde la
   UI.
 - Los checks solo alcanzan Tailscale y CIDRs privados autorizados; destinos publicos
   estan bloqueados por default.
 - Incidentes separan `state` (`open`/`resolved`) de `condition_status`
   (`true`/`false`/`unknown`).
-- La instalacion server en Oracle configura automaticamente el agente local.
+- Abrir un incidente captura el snapshot de canales destino; entregas no elegibles
+  terminan en estado terminal `skipped` auditable.
+- Webhooks Discord se validan con parser estructurado: host y path exactos, sin
+  userinfo, query, fragment ni puerto no estandar.
+- Puerto HTTPS 9474 fijo para agentes via Tailscale Serve; version incompatible falla,
+  sin fallback silencioso de puerto.
+- Dependencias Go fundacionales: `modernc.org/sqlite`, `golang.org/x/crypto/argon2` y
+  `go.yaml.in/yaml/v3`, con builds `CGO_ENABLED=0`.
+- La instalacion server en Oracle configura el agente local mediante el comando
+  idempotente `atalaya bootstrap local-agent`.
+- Migraciones se aplican al arrancar el servidor; `atalaya migrate` ejecuta las mismas
+  sin arrancarlo.
+- Modo `development` explicito; cookie sin `Secure` solo con listener y origen en
+  loopback.
+- `Cache-Control: no-store` en autenticacion y respuestas con secretos efimeros.
+- Respuestas de metricas declaran resolucion por punto, usan `mixed` al combinar
+  fuentes y limitan a 10000 puntos por serie con `422`.
 - Toolchain de build fijado por archivos de version y lockfiles.
 
 No decidido porque no bloquea inicio:

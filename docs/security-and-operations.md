@@ -25,11 +25,11 @@ No se promete resistir:
 - Dashboard escucha en `127.0.0.1:8080` por default y Tailscale Serve publica HTTPS
   443.
 - Agente escucha en `127.0.0.1:9474` y Tailscale Serve publica ese listener por HTTPS,
-  en 9474 como default propuesto. Nunca usa `0.0.0.0` por default. Si la version de
-  Tailscale Serve restringe puertos HTTPS (historicamente 443, 8443 y 10000), el
-  instalador usa un puerto permitido como fallback y registra el puerto efectivo en la
-  `agent_url` del host.
-- Firewall debe limitar puerto de agente a interfaz/rango Tailscale.
+  en 9474 como default fijo de v1. Nunca usa `0.0.0.0` por default. El instalador
+  verifica soporte para `serve --https=9474` y falla con la version minima requerida
+  si la CLI no lo admite; no elige otro puerto silenciosamente.
+- El backend 9474 permanece en loopback y no se abre en firewall. ACLs/grants de la
+  tailnet limitan quien alcanza el endpoint HTTPS publicado por Tailscale Serve.
 - Servidor usa MagicDNS y valida TLS para agentes.
 - No agregar opcion UI para ignorar TLS.
 - `/healthz` revela solamente salud binaria.
@@ -41,8 +41,8 @@ tailscale serve --bg http://127.0.0.1:8080
 ```
 
 Agente requiere una segunda regla Serve equivalente para su puerto HTTPS. Instalador
-detecta version de CLI, verifica que el puerto HTTPS solicitado este soportado y
-comprueba rutas efectivas; no concatena comandos suponiendo una sintaxis fija.
+detecta version de CLI y comprueba rutas efectivas; no concatena comandos suponiendo
+una sintaxis fija.
 
 Instalador debe detectar Tailscale desconectado y fallar con instruccion clara, no
 abrir listener publico como fallback.
@@ -68,6 +68,12 @@ del usuario. Login valida `Origin`; identidad Tailscale reenviada puede registra
 dato informativo solo si conexion inmediata es loopback y modo Serve esta habilitado,
 nunca autentica ni autoriza.
 
+Produccion siempre exige origen HTTPS y cookie `Secure`. El modo explicito
+`development` puede omitir `Secure` para el proxy HTTP de Vite solo cuando listener y
+origen publico son loopback (`localhost`, `127.0.0.1` o `::1`). Startup rechaza esa
+combinacion fuera de loopback; no existe un toggle de cookie insegura en configuracion
+de produccion.
+
 Headers minimos:
 
 - `Content-Security-Policy`
@@ -75,6 +81,8 @@ Headers minimos:
 - `Referrer-Policy: no-referrer`
 - `Permissions-Policy` restrictiva
 - `Frame-Options` equivalente mediante CSP `frame-ancestors 'none'`
+- `Cache-Control: no-store` en autenticacion, respuestas que establecen cookies y
+  respuestas con secretos efimeros
 
 ## 4. Secretos
 
@@ -120,10 +128,12 @@ La misma politica se aplica a TCP y a `agent_url`; un agente solo puede anunciar
 hostname MagicDNS o una direccion Tailscale con HTTPS valido.
 
 La politica de red de checks no cubre el egress de notificaciones: ese egress se
-restringe por proveedor. Cada adaptador define el patron de URL permitido; Discord
-solo acepta `https://discord.com/api/webhooks/...` y rechaza cualquier otro destino
-al guardar y antes de cada entrega o test. Un `webhook_url` nunca puede usarse como
-proxy hacia la red interna ni hacia destinos arbitrarios.
+restringe por proveedor. Cada adaptador valida la URL con un parser estructurado.
+Discord exige esquema `https`, hostname ASCII normalizado exactamente `discord.com`,
+puerto vacio o 443, ausencia de userinfo, query y fragment, y path con exactamente los
+segmentos `/api/webhooks/{id}/{token}` no vacios. Se rechazan escapes o segmentos
+adicionales al guardar y antes de cada entrega o test. Un `webhook_url` nunca puede
+usarse como proxy hacia la red interna ni hacia destinos arbitrarios.
 
 ## 6. Usuarios y permisos del sistema
 
