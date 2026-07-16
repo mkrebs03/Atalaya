@@ -8,8 +8,10 @@
 - Nombres JSON en `snake_case`.
 - Timestamps RFC 3339 UTC.
 - IDs opacos.
-- Mutaciones UI requieren sesion y proteccion CSRF, excepto login pre-auth definido
-  abajo.
+- Mutaciones UI requieren sesion y proteccion CSRF. Excepciones documentadas:
+  `POST /api/v1/auth/login` (pre-auth, valida `Origin`, sin CSRF) y
+  `POST /api/v1/agent-enrollments` (usado por agentes, autentica con token de
+  enrolamiento, sin sesion ni CSRF, rate-limited).
 - Respuestas nunca incluyen hashes, ciphertexts, tokens reutilizables ni secretos,
   salvo las excepciones efimeras documentadas para crear un token de enrolamiento y
   completar/repetir exactamente un enrolamiento autorizado. Esas respuestas no se
@@ -39,9 +41,10 @@ Codigos comunes:
 - `401`: sin sesion/credencial valida.
 - `403`: CSRF o accion no permitida.
 - `404`: recurso inexistente o no visible.
-- `409`: version, unicidad o transicion en conflicto.
+- `409`: unicidad o transicion en conflicto; conflictos de version usan `412`.
 - `412`: `If-Match` no coincide con version actual.
-- `422`: estructura valida pero configuracion de dominio invalida.
+- `422`: estructura valida pero semantica de dominio invalida, sea configuracion o
+  parametros de consulta fuera de limites.
 - `428`: mutacion de recurso existente sin `If-Match`.
 - `429`: login, enrolamiento o test limitado.
 - `500`: error interno no revelado.
@@ -113,8 +116,8 @@ coinciden token, `request_id` y hash del payload completo.
 - `POST /api/v1/auth/change-password`
 - `GET /api/v1/auth/csrf`
 
-Logout y cambio de password requieren CSRF. Cambio de password revoca otras sesiones;
-puede emitir sesion nueva para request actual.
+Logout y cambio de password requieren CSRF. Cambio de password revoca todas las
+sesiones existentes y puede emitir una sesion nueva para el request actual.
 
 Todo recurso mutable devuelve `version` entero y header `ETag: "<version>"`. `PATCH`,
 `DELETE`, enable/disable y otras mutaciones sobre recurso existente requieren
@@ -151,6 +154,8 @@ secretos y el frontend solo lo conserva en memoria mientras el administrador lo 
 `DELETE /api/v1/hosts/{id}` siempre archiva y desactiva el host, conserva historico e
 incidentes y requiere confirmacion explicita desde UI. `restore` quita el archivado,
 pero no reactiva automaticamente el monitoreo si el administrador lo habia desactivado.
+`enable` devuelve el host a `pending` cuando nunca tuvo un pull exitoso y a `active`
+en caso contrario; el estado observado se recalcula con el siguiente pull.
 
 Respuesta de metricas incluye resolucion real y series alineables sin inventar puntos.
 `resolution` solicitado puede ser `auto`, `raw` u `hourly`; la respuesta siempre
@@ -239,6 +244,9 @@ Configuracion HTTP:
 }
 ```
 
+`max_redirects` acepta valores de 1 a 3; 3 es tope duro de v1 y solo aplica cuando
+`follow_redirects` es `true`.
+
 Configuracion TCP:
 
 ```json
@@ -321,7 +329,9 @@ restauracion y cambios de regla esta en modelo de dominio.
 - `GET /api/v1/notification-deliveries?channel_id=&state=&cursor=`
 - `GET /api/v1/notification-deliveries/{id}`
 
-Crear/actualizar Discord acepta `webhook_url` como write-only. Lecturas devuelven:
+Crear/actualizar Discord acepta `webhook_url` como write-only. El servidor valida que
+la URL coincida con `https://discord.com/api/webhooks/...`; cualquier otro destino se
+rechaza con `422`. Lecturas devuelven:
 
 ```json
 {

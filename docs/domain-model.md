@@ -35,7 +35,8 @@ Base de datos impide mas de un administrador activo.
 - Administrador, creacion, expiracion absoluta, ultima actividad y revocacion.
 - Datos minimos de auditoria como IP tailnet y user-agent truncado.
 
-Cambiar o resetear password revoca todas las sesiones existentes.
+Cambiar o resetear password revoca todas las sesiones existentes; el cambio
+autenticado puede emitir una sesion nueva para el request actual.
 
 ### Host
 
@@ -103,7 +104,8 @@ Relacion con host es organizativa; check siempre se ejecuta desde servidor.
 
 Series crudas separan dimensiones para consultas acotadas:
 
-- Metricas de host: CPU, memoria usada/total y uptime.
+- Metricas de host: CPU y memoria usada/total. Uptime y boot ID pertenecen al estado
+  actual del snapshot; no generan series historicas.
 - Metricas de filesystem: usado/total por filesystem.
 - Resultados de check: exito, latencia, categoria de error, status HTTP opcional y
   `source` (`scheduled` o `manual`). Solo resultados scheduled alimentan estado,
@@ -118,7 +120,9 @@ Por hora UTC y serie:
 
 - `min`, `max`, `avg`, `count` para valores numericos.
 - Disponibilidad como exitos/total para checks.
-- Cantidad esperada segun intervalo efectivo y flag de ventana completa.
+- Cantidad esperada segun intervalo vigente al cierre de la ventana y flag de ventana
+  completa. Si el intervalo cambio dentro de la ventana, la cobertura usa ese valor y
+  la ventana puede quedar marcada como parcial.
 - Inicio y fin de ventana.
 
 Claves unicas impiden duplicados. Recalcular una ventana produce mismo resultado.
@@ -131,8 +135,10 @@ Claves unicas impiden duplicados. Recalcular una ventana produce mismo resultado
 - Umbral, operador, duracion sostenida y parametros propios del tipo.
 - Lista de canales destino.
 
-Configuracion invalida no puede activarse. Eliminar target desactiva regla, no elimina
-incidentes.
+Configuracion invalida no puede activarse. Archivar o desactivar el target detiene la
+evaluacion y resuelve el incidente abierto (`target_archived`/`target_disabled`); la
+regla y sus incidentes se conservan. Restaurar y habilitar el target reanuda la
+evaluacion desde `inactive`. No se puede agregar un canal archivado a una regla.
 
 ### AlertEvaluation
 
@@ -180,6 +186,9 @@ Outbox persistente:
 
 Clave unica por incidente, transicion y canal garantiza deduplicacion.
 
+Al crear entregas para una transicion, los canales archivados o desactivados se omiten
+sin crear entrega; la omision se registra en log con incidente y canal.
+
 Worker toma entrega con lease de 60 segundos. `sending` con lease vencido vuelve a
 `pending`. Se realizan hasta seis intentos con backoff acotado y jitter: 5 segundos,
 30 segundos, 2 minutos, 10 minutos y 30 minutos entre intentos; `Retry-After` valido
@@ -193,16 +202,23 @@ permanentes terminan `failed`. Por incidente/canal, entrega `resolved` espera qu
 
 ```text
 pending --first successful pull--> active/healthy
+pending --failure threshold------> pending/unreachable
 active  --isolated failure-------> active/degraded
 active  --failure threshold------> active/unreachable
 active  --successful pull--------> active/healthy
 *       --admin disables---------> disabled/unknown
+disabled --enable----------------> pending|active/unknown
 *       --archive-----------------> archived/unknown
 archived --restore---------------> disabled/unknown
 ```
 
 Un pull exitoso despues de `unreachable` recupera host inmediatamente; reglas deciden
 si incidente resuelve con una o mas muestras exitosas.
+
+Para un host `pending` nunca observado, la edad se mide desde el enrolamiento y su
+estado observado es `unknown` hasta alcanzar el umbral de `unreachable`. `enable`
+devuelve el host a `pending` si nunca tuvo un pull exitoso y a `active` en caso
+contrario; el estado observado se recalcula con el siguiente pull.
 
 ### Check
 
@@ -264,7 +280,10 @@ respuesta es 10000 puntos por serie; consultas que lo superen responden 422.
 - Activar `PRAGMA foreign_keys=ON` en cada conexion.
 - Usar WAL y `busy_timeout`.
 - Un writer logico por transaccion corta; red nunca dentro de transaccion.
-- Migraciones versionadas y ejecutadas antes de aceptar trafico.
+- Migraciones versionadas. El servidor aplica migraciones pendientes al arrancar,
+  antes de aceptar trafico. `atalaya migrate` ejecuta las mismas migraciones sin
+  arrancar el servidor, para restauracion y upgrades supervisados; ambos caminos
+  comparten implementacion.
 - Indices comienzan por identidad de serie y timestamp.
 - Limitar tamano de strings, errores y payloads antes de persistir.
 

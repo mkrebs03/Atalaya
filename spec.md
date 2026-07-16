@@ -25,7 +25,9 @@ no justifica agregar multiusuario ni abstracciones innecesarias en v1.
 - Instalacion y actualizacion simples: un ejecutable, SQLite y `systemd`.
 - Sin Docker, Node.js, Go, proxy web adicional como nginx/Caddy o base de datos
   externa en runtime. Tailscale Serve es parte requerida de conectividad Tailscale.
-- Todo acceso operativo ocurre dentro de Tailscale.
+- Todo acceso operativo ocurre dentro de Tailscale. Unica excepcion: egress de
+  notificaciones hacia proveedores externos configurados explicitamente, como el
+  webhook de Discord.
 - Tailscale limita exposicion de red, pero no reemplaza autenticacion propia.
 - Los checks solo pueden alcanzar destinos de la tailnet o CIDRs privados autorizados
   explicitamente; destinos publicos quedan bloqueados por default.
@@ -80,7 +82,7 @@ Tipos v1:
 
 - HTTP/HTTPS: metodo `GET`, intervalo y timeout configurables, rango esperado
   configurable y valor por defecto 200-299. Redirects estan desactivados por default;
-  si se habilitan, tienen un maximo configurable de 3.
+  si se habilitan, el limite es configurable de 1 a 3, con tope duro de 3 en v1.
 - TCP: apertura de conexion a host y puerto con timeout configurable.
 
 Los checks se ejecutan desde el servidor central para representar disponibilidad
@@ -137,9 +139,8 @@ Tipos de regla v1:
 - CPU o memoria por encima de un umbral durante tiempo sostenido.
 - Filesystem por encima de un umbral configurable.
 
-Cada evaluacion de alerta sigue este ciclo:
-
-`pending -> firing -> resolved`
+Cada evaluacion de alerta sigue el ciclo `inactive -> pending -> firing`. La
+resolucion cierra el incidente asociado; no es un estado de evaluacion.
 
 El sistema DEBE:
 
@@ -160,12 +161,9 @@ El sistema DEBE:
 - Fallar al enviar una notificacion NO DEBE bloquear evaluacion ni persistencia de
   alertas.
 - Intentos y errores de entrega deben quedar registrados.
-- Webhooks y credenciales reutilizables se almacenan cifrados. Passwords, sesiones y
-  tokens de enrolamiento se almacenan como hashes; nunca se devuelven secretos completos
-  a la UI salvo las respuestas efimeras documentadas de creacion y enrolamiento.
-- El secreto de un token de enrolamiento solo se muestra en la respuesta de creacion,
-  una vez, y la credencial de agente solo se entrega al agente durante el enrolamiento
-  o replay exacto autorizado.
+- Webhooks y credenciales reutilizables se almacenan cifrados. La URL de webhook se
+  valida contra el patron del proveedor; para Discord solo se acepta
+  `https://discord.com/api/webhooks/...`.
 - Permitir archivar y restaurar canales. Un canal archivado no recibe entregas nuevas,
   pero conserva su historial.
 
@@ -175,6 +173,12 @@ El sistema DEBE:
 - El primer administrador se crea mediante comando local de bootstrap.
 - Login usa usuario y contraseña propia, independiente de identidad Tailscale.
 - Contraseñas usan Argon2id y nunca se almacenan reversiblemente.
+- Passwords, sesiones y tokens de enrolamiento se almacenan como hashes; nunca se
+  devuelven secretos completos a la UI salvo las respuestas efimeras documentadas de
+  creacion y enrolamiento.
+- El secreto de un token de enrolamiento solo se muestra en la respuesta de creacion,
+  una vez, y la credencial de agente solo se entrega al agente durante el enrolamiento
+  o replay exacto autorizado.
 - Sesiones usan cookies `HttpOnly`, `Secure` y `SameSite` apropiado.
 - Recuperacion de contraseña se realiza mediante comando local, no email.
 - Ninguna metrica, configuracion o dato historico es accesible sin autenticacion.
@@ -269,8 +273,8 @@ v1 se considera completa cuando:
 7. Checks HTTP y TCP pueden gestionarse desde UI, respetan la politica de red y
    conservan resultados programados, historico y latencia.
 8. Graficos distinguen datos crudos, agregados y periodos sin muestras.
-9. Reglas sostenidas transitan entre `pending`, `firing` y `resolved` sin duplicar
-   incidentes.
+9. Reglas sostenidas transitan entre `inactive`, `pending` y `firing`, y cierran su
+   incidente al resolverse, sin duplicar incidentes.
 10. Discord recibe apertura y resolucion de un incidente; errores quedan registrados.
 11. Secretos no aparecen en respuestas API, logs ni exportaciones de configuracion.
 12. Reiniciar o actualizar servidor conserva configuracion, sesiones validas segun su

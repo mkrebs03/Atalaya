@@ -10,7 +10,7 @@
 - `systemd` para supervisar servidor y agentes.
 - Tailscale para conectividad privada y resolucion MagicDNS.
 
-Builds fijan Go `1.26.4` y Node.js `25.2.1` mediante `.tool-versions` y un lockfile
+Builds fijan Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions` y un lockfile
 npm. La version de Tailscale es una dependencia del sistema: el instalador detecta
 capacidades de la CLI y la version minima soportada se prueba en CI.
 
@@ -59,6 +59,12 @@ solo en `127.0.0.1:9474`; Tailscale Serve del host publica ese listener mediante
 en puerto 9474. El servidor consulta `https://<magicdns>:9474`. En Oracle ambas rutas
 coexisten: dashboard en 443 y agente en 9474. Certificados y renovacion pertenecen a
 Tailscale Serve, no al proyecto.
+
+El puerto HTTPS 9474 del agente es un default propuesto: versiones de Tailscale Serve
+restringen los puertos HTTPS publicables (historicamente 443, 8443 y 10000). El
+instalador DEBE verificar que la version instalada soporte el puerto elegido y usar
+8443 o 10000 como fallback documentado; el puerto efectivo queda registrado en la
+`agent_url` del host.
 
 Instalador configura ambas rutas cuando instala roles juntos y verifica que puerto no
 este ocupado. Sintaxis exacta de CLI debe adaptarse a version Tailscale detectada y
@@ -183,7 +189,7 @@ alta disponibilidad estan fuera de alcance.
 Checks se ejecutan en servidor, independientemente del pull de agentes.
 
 - HTTP sigue redirects solo si configuracion lo permite; estan desactivados por default
-  y el maximo es 3.
+  y el limite es configurable de 1 a 3, con tope duro de 3.
 - HTTPS valida certificados del sistema; desactivar validacion queda fuera de v1.
 - Respuesta se considera exitosa por rango HTTP configurado.
 - Cuerpo de respuesta no se persiste.

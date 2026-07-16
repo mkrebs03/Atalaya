@@ -20,9 +20,10 @@ make build
 make test-e2e
 ```
 
-Fase 0 tambien fija Go `1.26.4` y Node.js `25.2.1` mediante `.tool-versions`, lockfile
-npm, Vitest para tests frontend, Playwright para E2E y una herramienta de lint
-frontend. El CI usa las versiones fijadas y `make` delega a los mismos comandos
+Fase 0 tambien fija Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions`,
+lockfile npm, Vitest para tests frontend, Playwright para E2E, y ESLint con
+`eslint-plugin-vue` mas Prettier para lint y formato frontend. El CI usa las versiones
+fijadas y `make` delega a los mismos comandos
 locales. Si el proyecto cambia de task runner, conserva equivalentes documentados en
 README.
 

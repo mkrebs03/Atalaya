@@ -24,8 +24,11 @@ No se promete resistir:
 
 - Dashboard escucha en `127.0.0.1:8080` por default y Tailscale Serve publica HTTPS
   443.
-- Agente escucha en `127.0.0.1:9474` y Tailscale Serve publica HTTPS 9474. Nunca usa
-  `0.0.0.0` por default.
+- Agente escucha en `127.0.0.1:9474` y Tailscale Serve publica ese listener por HTTPS,
+  en 9474 como default propuesto. Nunca usa `0.0.0.0` por default. Si la version de
+  Tailscale Serve restringe puertos HTTPS (historicamente 443, 8443 y 10000), el
+  instalador usa un puerto permitido como fallback y registra el puerto efectivo en la
+  `agent_url` del host.
 - Firewall debe limitar puerto de agente a interfaz/rango Tailscale.
 - Servidor usa MagicDNS y valida TLS para agentes.
 - No agregar opcion UI para ignorar TLS.
@@ -37,9 +40,9 @@ Ejemplo conceptual, sujeto a CLI vigente de Tailscale:
 tailscale serve --bg http://127.0.0.1:8080
 ```
 
-Agente requiere una segunda regla Serve equivalente para puerto HTTPS 9474. Instalador
-detecta version de CLI y verifica rutas efectivas; no concatena comandos suponiendo una
-sintaxis fija.
+Agente requiere una segunda regla Serve equivalente para su puerto HTTPS. Instalador
+detecta version de CLI, verifica que el puerto HTTPS solicitado este soportado y
+comprueba rutas efectivas; no concatena comandos suponiendo una sintaxis fija.
 
 Instalador debe detectar Tailscale desconectado y fallar con instruccion clara, no
 abrir listener publico como fallback.
@@ -115,6 +118,12 @@ CIDR. Validacion al guardar revisa sintaxis; cada ejecucion y redirect vuelve a 
 y exige que todas las IPs resultantes cumplan politica. Resultado mixto se rechaza.
 La misma politica se aplica a TCP y a `agent_url`; un agente solo puede anunciar un
 hostname MagicDNS o una direccion Tailscale con HTTPS valido.
+
+La politica de red de checks no cubre el egress de notificaciones: ese egress se
+restringe por proveedor. Cada adaptador define el patron de URL permitido; Discord
+solo acepta `https://discord.com/api/webhooks/...` y rechaza cualquier otro destino
+al guardar y antes de cada entrega o test. Un `webhook_url` nunca puede usarse como
+proxy hacia la red interna ni hacia destinos arbitrarios.
 
 ## 6. Usuarios y permisos del sistema
 
