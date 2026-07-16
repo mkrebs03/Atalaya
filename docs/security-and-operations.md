@@ -57,9 +57,10 @@ abrir listener publico como fallback.
 
 ## 3. Passwords y sesiones
 
-- Argon2id con salt aleatoria y parametros guardados junto a hash.
-- Parametros se calibran para servidor objetivo y tienen minimo seguro documentado en
-  codigo.
+- v1 usa Argon2id v19 con perfil fijo `m=65536` KiB, `t=3`, `p=4`, salt aleatoria de
+  16 bytes y tag de 32 bytes, almacenado en formato PHC. Es el segundo perfil recomendado
+  por RFC 9106 para entornos con memoria limitada; perfiles futuros pueden convivir con
+  el actual y provocar rehash despues de un login valido.
 - Comparacion y mensajes de login evitan enumeracion.
 - Rate limit global y por username normalizado con backoff para login. Respuesta no
   revela si username existe.

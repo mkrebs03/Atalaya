@@ -12,6 +12,8 @@
   de salida.
 - [Dependencias de runtime y fundacionales](dependencies.md): versiones directas y
   licencias.
+- [Diseno de Fase 1A](superpowers/specs/2026-07-16-phase-1a-persistence-admin-design.md):
+  detalle de implementacion para persistencia segura y administrador inicial.
 
 ## Autoridad
 
@@ -23,6 +25,10 @@ Orden de precedencia ante contradicciones:
 4. `docs/domain-model.md` para semantica y persistencia.
 5. `docs/architecture.md` para organizacion interna y stack.
 6. `docs/implementation-plan.md` para secuencia de trabajo, no comportamiento.
+
+Los disenos bajo `docs/superpowers/specs/` refinan una entrega concreta y son
+subordinados a todos los documentos canonicos anteriores. Solo se aplican mientras no
+los contradigan.
 
 Si dos requisitos del mismo nivel se contradicen, detener implementacion y actualizar
 documentacion mediante una decision explicita. No elegir silenciosamente.
@@ -86,6 +92,8 @@ Decisiones cerradas:
   idempotente `atalaya bootstrap local-agent`.
 - Migraciones se aplican al arrancar el servidor; `atalaya migrate` ejecuta las mismas
   sin arrancarlo.
+- La Fase 1A de persistencia y administrador inicial usa el diseno subordinado
+  [aprobado](superpowers/specs/2026-07-16-phase-1a-persistence-admin-design.md).
 - Modo `development` explicito; cookie sin `Secure` solo con listener y origen en
   loopback.
 - `Cache-Control: no-store` en autenticacion y respuestas con secretos efimeros.
