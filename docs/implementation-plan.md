@@ -22,8 +22,8 @@ make test-e2e
 
 Fase 0 tambien fija Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions`,
 lockfile npm, Vitest para tests frontend, Playwright para E2E, y ESLint con
-`eslint-plugin-vue` mas Prettier para lint y formato frontend. El CI usa las versiones
-fijadas y `make` delega a los mismos comandos
+`eslint-plugin-vue` mas Prettier para lint y formato frontend. El CI en GitHub Actions
+usa las versiones fijadas y `make` delega a los mismos comandos
 locales. Si el proyecto cambia de task runner, conserva equivalentes documentados en
 README.
 
@@ -124,7 +124,8 @@ Trabajo:
   identidad UUID-first y fallback sin fusion heuristica.
 - Implementar listener del agente y bearer por agente.
 - Implementar tokens de enrolamiento desde API/UI.
-- Implementar enrolamiento idempotente y persistencia `0600` en agente.
+- Implementar enrolamiento idempotente y persistencia `0600` en agente; el token
+  ingresa por prompt o archivo temporal eliminado, nunca por argv.
 - Implementar scheduler pull, timeouts, jitter y limite de concurrencia.
 - Capturar intervalo/timeout por schedule, limitar jitter a 5 segundos y actualizar
   `freshness_deadline_at` solo tras exito desde el siguiente deadline mas 5 segundos.

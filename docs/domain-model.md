@@ -112,8 +112,9 @@ similares se excluyen por default. Exclusion exacta es lista versionada y testea
 - Configuracion tipada por clase de check.
 - Estado actual derivado: `unknown`, `up`, `down`.
 - Ultimo intento, ultimo exito, latencia y error normalizado.
-- `freshness_deadline_at` con la misma semantica que host; solo un resultado programado
-  exitoso lo actualiza.
+- `freshness_deadline_at` con la misma semantica que host. Cualquier resultado
+  programado completado (`up` o `down`) lo actualiza; un check caido entrega datos
+  frescos. Solo un slot `failed` por imposibilidad interna no lo actualiza.
 
 Relacion con host es organizativa; check siempre se ejecuta desde servidor.
 
@@ -172,6 +173,10 @@ Unidad persistida de ejecucion para host o check:
   un lease de `timeout efectivo + 5 segundos de margen` y contador de intentos de
   proceso. `cancelled` exige razon `missed_deadline`, `target_disabled` o
   `target_archived`.
+- Para un host, `succeeded` exige un pull que entrego snapshot valido; cualquier otro
+  intento completado es `failed`. Para un check, `succeeded` es una ejecucion que
+  produjo resultado `up` o `down`; `failed` se reserva para imposibilidad interna del
+  servidor y no representa check down.
 - Restriccion unica permite como maximo un slot no terminal por target.
 - Resultado scheduled, finalizacion y siguiente slot se escriben en la misma
   transaccion; cada resultado o conjunto de muestras referencia `slot_id` con unicidad

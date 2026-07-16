@@ -47,6 +47,7 @@ Decisiones cerradas:
 - Go para servidor, agente y CLI.
 - Modulo Go canonico `github.com/mkrebs03/atalaya`; el nombre publico del producto
   puede cambiar sin renombrar imports.
+- GitHub Actions como CI para lint, tests, build y matriz Tailscale.
 - Vue 3, TypeScript y Vite para frontend.
 - SQLite como unica base de datos v1.
 - `systemd` para procesos Linux.

@@ -256,6 +256,9 @@ alojar dashboard ni historico.
 - Logs centralizados, tracing distribuido o reemplazo de una plataforma APM.
 - Plugins ejecutables arbitrarios o scripts definidos desde UI.
 - Checks ICMP, DNS, certificados TLS, contenido HTTP o transacciones sinteticas.
+- Estado, metricas o healthchecks por contenedor (Docker, Podman). Un servicio en
+  contenedor se monitorea mediante checks HTTP/TCP contra su puerto publicado en el
+  host, alcanzable via tailnet o CIDR privado autorizado.
 - Alta disponibilidad del servidor o replicacion de SQLite.
 - Descubrimiento automatico de hosts o servicios de la tailnet.
 - Watchdog externo a Oracle.
@@ -271,7 +274,8 @@ Posibles extensiones, no compromisos:
 - Reglas de mantenimiento y silencios programados.
 - Comparacion entre hosts y dashboards personalizables.
 - Publicacion del proyecto y paquetes `.deb`/`.rpm`.
-- Checks locales especificos, como presencia de una sesion tmux.
+- Checks locales especificos, como presencia de una sesion tmux o estado de
+  contenedores Docker leidos por el agente.
 
 Estas extensiones deben usar contratos existentes cuando sea razonable, pero v1 no
 debe construir infraestructura especulativa para ellas.

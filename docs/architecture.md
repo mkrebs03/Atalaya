@@ -15,7 +15,8 @@ npm. Tailscale es una dependencia del sistema validada por capacidades: cada rel
 prueba en CI la version estable vigente y la version mas antigua incluida en su matriz
 de compatibilidad, sin prometer un minimo global independiente de la release.
 El modulo Go canonico es `github.com/mkrebs03/atalaya`; no depende del nombre comercial
-que pueda adoptar el producto.
+que pueda adoptar el producto. La integracion continua corre en GitHub Actions: lint,
+tests, build y la matriz Tailscale por release.
 
 Dependencias Go fundacionales aprobadas para v1:
 
@@ -152,7 +153,9 @@ del modulo que los consume.
 1. Para un host remoto, el administrador crea token desde UI. v1 permite exactamente un enrolamiento y 15
    minutos de validez.
 2. UI muestra token una sola vez.
-3. Operador instala agente indicando URL del servidor, token y nombre MagicDNS local.
+3. Operador instala agente indicando URL del servidor y nombre MagicDNS local. El
+   token se ingresa por prompt interactivo o archivo `0600` que se elimina tras el
+   enrolamiento; nunca por argumento de linea de comandos.
 4. Agente conecta por HTTPS a `POST /api/v1/agent-enrollments`.
 5. Servidor valida token, expiracion y uso dentro de una transaccion.
 6. Servidor crea host pendiente y credencial aleatoria por agente.
@@ -207,7 +210,9 @@ siguiente slot con
 `nominal_at = previous.nominal_at + previous.effective_interval`, usando la
 configuracion vigente en esa frontera. Solo un exito actualiza
 `freshness_deadline_at = next_slot.deadline_at + 5 segundos`; fallos, downtime y
-reanclajes no prolongan la frescura del ultimo valor. `last_success_received_at` siempre
+reanclajes no prolongan la frescura del ultimo valor. Para un check, exito del slot es
+haber producido resultado `up` o `down`: un check caido sigue entregando datos frescos
+y no se presenta como stale. `last_success_received_at` siempre
 usa `received_at` del servidor, nunca `observed_at` del agente; es el timestamp de la
 muestra, no el ancla de la cadencia. Cambiar intervalo aplica al primer slot que se cree
 despues del cambio; no modifica un slot ya creado ni recalcula frescura o timestamps

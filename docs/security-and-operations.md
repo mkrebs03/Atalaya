@@ -111,6 +111,11 @@ de entidad. Registro guarda version de formato para futura rotacion.
 Passwords y tokens de sesion/enrolamiento se hashean, no se cifran. Credenciales que
 servidor necesita reutilizar, como webhook Discord y bearer de agente, se cifran.
 
+El token de enrolamiento se suministra al agente mediante prompt interactivo o archivo
+`0600` eliminado tras su uso. Nunca se pasa por argv ni queda en variables
+persistentes, para no filtrarse en historial de shell, listado de procesos o logs del
+instalador.
+
 Logs aplican redaccion por nombre y tipo. URLs con userinfo o query sensible no se
 registran completas. Errores de Discord no incluyen webhook URL.
 
