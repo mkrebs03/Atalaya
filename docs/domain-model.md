@@ -33,7 +33,10 @@ Base de datos impide mas de un administrador activo.
 
 - Hash del token, nunca token en claro.
 - Administrador, creacion, expiracion absoluta, ultima actividad y revocacion.
-- Datos minimos de auditoria como IP tailnet y user-agent truncado.
+- `remote_addr` observado por el servidor y user-agent truncado. Bajo Tailscale Serve,
+  `remote_addr` normalmente es loopback y no se presenta como IP del usuario.
+- Identidad reenviada por el proxy local, nullable y marcada `informational`; nunca se
+  usa para autenticar, autorizar o atribuir una IP tailnet.
 
 Cambiar o resetear password revoca todas las sesiones existentes; el cambio
 autenticado puede emitir una sesion nueva para el request actual.
@@ -83,11 +86,19 @@ clock skew. Servidor rechaza o marca snapshots con desviacion excesiva.
 
 ### Filesystem
 
-Identidad estable dentro de host mediante mount point y dispositivo normalizados:
+Identidad dentro de host con procedencia explicita:
 
-- Mount point, tipo, dispositivo, total, usado, disponible.
+- `identity_kind=uuid|fallback` e `identity_key` inmutable.
+- UUID de filesystem nullable, root del mount, major:minor, mount point, tipo,
+  dispositivo, total, usado y disponible.
 - Descubierto, seleccionado para monitoreo o ignorado.
 - Ultima vez observado.
+
+Cuando existe UUID, la clave es `uuid + mount_root + mount_point`; asi un cambio de
+`/dev/sdX` no rompe la serie y dos mounts permanecen distinguibles. Sin UUID, la clave
+fallback usa dispositivo normalizado, mount root y mount point. En ambos casos, mover
+el mount crea una entidad nueva. El fallback es best-effort: si cambia cualquiera de
+sus componentes nunca se fusiona historico por heuristica.
 
 Pseudo-filesystems como `proc`, `sysfs`, `tmpfs`, `devtmpfs`, `cgroup`, `overlay` y
 similares se excluyen por default. Exclusion exacta es lista versionada y testeada.
@@ -104,6 +115,18 @@ similares se excluyen por default. Exclusion exacta es lista versionada y testea
 
 Relacion con host es organizativa; check siempre se ejecuta desde servidor.
 
+### CheckRun
+
+Ejecucion manual asincrona separada del scheduling:
+
+- `id`, check, `request_id` de cliente unico por check para idempotencia de creacion,
+  estado `queued|running|completed|failed`, solicitud, inicio y fin.
+- Resultado normalizado solo en `completed`: up/down, latencia, categoria de error y
+  status HTTP. `failed` usa un codigo operativo seguro (`internal`, `shutdown`,
+  `check_archived`) y no representa check down.
+- Nunca referencia `ScheduleSlot`, alimenta rollups, cambia estado actual ni evalua
+  alertas.
+
 ### SchedulePeriod
 
 Historia de scheduling compartida por hosts y checks:
@@ -112,9 +135,33 @@ Historia de scheduling compartida por hosts y checks:
 - Habilitar un target abre un periodo; cambiar intervalo/timeout cierra el vigente y
   abre otro en la frontera del siguiente schedule; desactivar o archivar lo cierra.
 - Los slots nominales derivados del periodo permiten calcular deadlines y muestras
-  esperadas sin reinterpretar el pasado con configuracion actual.
-- El `deadline_at` de un slot es
-  `tiempo nominal + jitter maximo (5 segundos) + timeout efectivo`.
+  esperadas sin reinterpretar el pasado con configuracion actual, usando las mismas
+  formulas de `not_before_at` y `deadline_at` definidas en `ScheduleSlot`.
+
+### ScheduleSlot
+
+Unidad persistida de ejecucion para host o check:
+
+- `id`, target, `schedule_period_id`, `nominal_at`, `not_before_at`, `deadline_at`,
+  intervalo y timeout efectivos.
+- `not_before_at` es `nominal_at + jitter elegido al crear el slot`, con jitter maximo
+  de 5 segundos. `deadline_at` es
+  `nominal_at + jitter maximo (5 segundos) + timeout efectivo`.
+- Estado `scheduled`, `running`, `succeeded`, `failed` o `cancelled`; `running` guarda
+  un lease de `timeout efectivo + 5 segundos de margen` y contador de intentos de
+  proceso.
+- Restriccion unica permite como maximo un slot no terminal por target.
+- Resultado scheduled, finalizacion y siguiente slot se escriben en la misma
+  transaccion; cada resultado o conjunto de muestras referencia `slot_id` con unicidad
+  para evitar duplicados o targets habilitados sin agenda.
+
+En restart, un lease vencido vuelve a `scheduled`. Se ejecuta como maximo el slot
+persistido vencido; slots nominales intermedios por downtime no se materializan ni
+cuentan como fallos. Al terminar se crea en la misma transaccion un unico slot futuro,
+sin catch-up en cascada.
+Desactivar o archivar cancela el slot no iniciado; una ejecucion de red ya reclamada
+puede finalizar, pero la transaccion la marca `cancelled`, no incorpora su resultado a
+estado/series/alertas y no crea otro slot.
 
 ### MetricSample
 
@@ -123,9 +170,10 @@ Series crudas separan dimensiones para consultas acotadas:
 - Metricas de host: CPU y memoria usada/total. Uptime y boot ID pertenecen al estado
   actual del snapshot; no generan series historicas.
 - Metricas de filesystem: usado/total por filesystem.
-- Resultados de check: exito, latencia, categoria de error, status HTTP opcional y
-  `source` (`scheduled` o `manual`). Solo resultados scheduled alimentan estado,
-  rollups y alertas.
+- Resultados scheduled de check: exito, latencia, categoria de error y status HTTP
+  opcional; alimentan estado, rollups y alertas.
+- Muestras y resultados scheduled referencian `slot_id`; ejecuciones manuales viven en
+  `CheckRun` y nunca en esta entidad.
 
 No guardar blobs JSON completos como unica fuente historica. Snapshot original puede
 registrarse temporalmente en debug, nunca requerido para consultas.
@@ -198,12 +246,17 @@ identidad y no se eliminan al archivar configuracion.
 
 Outbox persistente:
 
-- Incidente, transicion, canal y payload renderizable sin secreto.
+- `kind` (`incident` o `test`), canal y payload renderizable sin secreto.
+- Para `incident`, incidente y transicion `firing|resolved` obligatorios. Para `test`,
+  ambos son null y `test_request_id` es obligatorio.
 - Estado `pending`, `sending`, `delivered`, `failed`, `skipped`.
 - Intentos, proximo intento, ultimo error, razon estable de `skipped` cuando aplica y
   timestamps.
 
-Clave unica por incidente, transicion y canal garantiza deduplicacion.
+Indice unico parcial por incidente, transicion y canal garantiza deduplicacion de
+entregas `incident`. Otro indice por canal y `test_request_id` hace idempotente el
+replay exacto de `test`; cada request ID distinto representa una prueba nueva. Tests
+no participan en orden firing/resolved.
 
 Cuando un incidente entra en `firing`, captura como destinos todos los canales
 configurados en la regla. Se crea una entrega de apertura por destino: `pending` si el
@@ -216,7 +269,11 @@ apertura fue `skipped`, o el canal ya no es elegible, la resolucion tambien qued
 auditoria, sin intento de red.
 
 Worker toma entrega con lease de 60 segundos. `sending` con lease vencido vuelve a
-`pending`. Se realizan hasta seis intentos con backoff acotado y jitter: 5 segundos,
+`pending`. En la misma transaccion de claim vuelve a leer el canal: si esta desactivado
+o archivado, convierte la entrega a `skipped` con razon estable y no inicia red. Si el
+canal cambia despues de pasar a `sending`, el request en curso puede terminar; el
+cambio detiene reintentos y entregas aun no reclamadas. Se realizan hasta seis intentos
+con backoff acotado y jitter: 5 segundos,
 30 segundos, 2 minutos, 10 minutos y 30 minutos entre intentos; `Retry-After` valido
 puede extender espera hasta 2 horas. HTTP 429 y 5xx son reintentables; errores 4xx
 permanentes terminan `failed`. Por incidente/canal, entrega `resolved` espera que
@@ -288,6 +345,9 @@ Defaults:
 - Rollups horarios: 90 dias.
 - Incidentes, configuracion y auditoria esencial: sin expiracion automatica v1.
 - Entregas de notificacion: 90 dias por default, preservando resumen en incidente.
+- Runs manuales (`CheckRun`): 90 dias por default.
+- Slots de schedule terminales: misma retencion que las muestras crudas. Se conservan
+  siempre los slots fallidos activos y el ultimo slot exitoso por target.
 - Sesiones expiradas y tokens consumidos: limpieza periodica tras 30 dias.
 
 Orden seguro del job:

@@ -45,6 +45,8 @@ documentacion mediante una decision explicita. No elegir silenciosamente.
 Decisiones cerradas:
 
 - Go para servidor, agente y CLI.
+- Modulo Go canonico `github.com/mkrebs03/atalaya`; el nombre publico del producto
+  puede cambiar sin renombrar imports.
 - Vue 3, TypeScript y Vite para frontend.
 - SQLite como unica base de datos v1.
 - `systemd` para procesos Linux.
@@ -53,8 +55,9 @@ Decisiones cerradas:
 - Usuario administrador unico con auth local.
 - Discord como primer adaptador de notificacion.
 - `received_at` del servidor es la referencia unica para frescura, series y alertas.
-- Scheduling por slots: cada schedule captura intervalo y timeout efectivos
-  (`SchedulePeriod`); cambios de configuracion no reinterpretan slots ya emitidos.
+- Scheduling persistente: `SchedulePeriod` conserva la historia usada por cobertura y
+  `ScheduleSlot` identifica cada ejecucion emitida; cambios de configuracion no
+  reinterpretan slots existentes.
 - `unreachable` requiere tres fallos programados consecutivos y alcanzar el deadline
   del tercer slot fallido.
 - `DELETE` archiva siempre los recursos configurables; no hay borrado fisico desde la
@@ -65,6 +68,8 @@ Decisiones cerradas:
   (`true`/`false`/`unknown`).
 - Abrir un incidente captura el snapshot de canales destino; entregas no elegibles
   terminan en estado terminal `skipped` auditable.
+- Entregas distinguen `incident` y `test`; el worker vuelve a validar el canal al
+  adquirir el lease.
 - Webhooks Discord se validan con parser estructurado: host y path exactos, sin
   userinfo, query, fragment ni puerto no estandar.
 - Puerto HTTPS 9474 fijo para agentes via Tailscale Serve; version incompatible falla,
@@ -80,10 +85,11 @@ Decisiones cerradas:
 - `Cache-Control: no-store` en autenticacion y respuestas con secretos efimeros.
 - Respuestas de metricas declaran resolucion por punto, usan `mixed` al combinar
   fuentes y limitan a 10000 puntos por serie con `422`.
+- Backups de datos excluyen la clave maestra; su exportacion y custodia son separadas.
 - Toolchain de build fijado por archivos de version y lockfiles.
 
 No decidido porque no bloquea inicio:
 
-- Nombre publico definitivo y dominio de paquetes Go.
+- Nombre publico definitivo.
 - Proveedor de releases mientras proyecto siga privado.
 - Proveedores de notificacion posteriores a Discord.

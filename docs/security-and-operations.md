@@ -68,6 +68,10 @@ del usuario. Login valida `Origin`; identidad Tailscale reenviada puede registra
 dato informativo solo si conexion inmediata es loopback y modo Serve esta habilitado,
 nunca autentica ni autoriza.
 
+Auditoria persiste el `remote_addr` realmente observado y, por separado, identidad
+proxy informativa nullable con su marca de confianza. No etiqueta loopback ni headers
+reenviados como IP tailnet del administrador.
+
 Produccion siempre exige origen HTTPS y cookie `Secure`. El modo explicito
 `development` puede omitir `Secure` para el proxy HTTP de Vite solo cuando listener y
 origen publico son loopback (`localhost`, `127.0.0.1` o `::1`). Startup rechaza esa
@@ -178,28 +182,33 @@ forma de configurar produccion.
 Backup consistente usa API de backup SQLite o `VACUUM INTO`; no copiar archivo DB vivo
 ignorando WAL.
 
-Backup minimo contiene:
+El backup de datos contiene:
 
 - Snapshot SQLite consistente.
-- Clave maestra protegida por separado.
-- Config de arranque.
+- Config de arranque sin secretos.
 - Version de aplicacion y schema.
 
-`atalaya backup --output <path>` produce ese conjunto de forma consistente. El comando
-no incluye secretos en texto plano fuera del archivo de clave protegido y falla si no
-puede preservar permisos.
+`atalaya backup --output <path>` produce un archivo de datos modo `0600` y nunca incluye
+`master.key`. El backup por si solo no permite descifrar credenciales. La clave se
+exporta explicitamente con `atalaya backup-key --output <separate-path>`, tambien
+`0600`, despues de una confirmacion interactiva o flag no interactivo explicito. El
+comando rechaza sobrescribir un archivo existente, y la documentacion exige custodiar
+ambos artefactos en ubicaciones o mecanismos de cifrado distintos. v1 no
+afirma cifrar esos artefactos: quien obtenga DB y clave puede leer secretos.
 
 Procedimiento de restauracion:
 
 1. Detener servidor.
-2. Restaurar config, clave y DB con propietario/permisos correctos.
+2. Restaurar el backup de datos y una copia separada de la clave maestra con
+   propietario/permisos correctos.
 3. Ejecutar verificacion de integridad SQLite.
 4. Instalar version compatible o superior que incluya migraciones.
 5. Iniciar y comprobar `/healthz`, login, hosts y descifrado de canales.
 
-Antes de cada migracion de upgrade, crear backup automatico local. Retencion de esos
-backups debe ser acotada y configurable. Copia fuera de Oracle es recomendada, pero su
-automatizacion queda fuera de v1.
+Antes de cada migracion de upgrade, crear backup automatico local de datos. La clave
+existente no se copia porque v1 no la rota durante migraciones. Retencion de backups
+debe ser acotada y configurable. Copias separadas de datos y clave fuera de Oracle son
+recomendadas, pero su automatizacion queda fuera de v1.
 
 ## 9. Instalacion y releases
 

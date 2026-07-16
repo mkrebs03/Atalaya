@@ -202,6 +202,15 @@ ventana raw y raw para el tramo reciente. UI no une como continuos puntos separa
 por una ventana ausente y distingue visualmente rollup parcial. No usar cero o `null`
 sintetico como medicion.
 
+`raw` exige que toda la ventana solicitada este dentro de la retencion disponible; si
+`from` es anterior al cutoff responde `422` con codigo `raw_not_available` y
+`earliest_available_at`, sin devolver datos parciales. `hourly` usa rollups persistidos
+y, para una hora abierta o completa aun no agregada que conserve raw, calcula el bucket
+en lectura sin persistirlo. Ese punto sigue declarando `resolution=hourly` y
+`complete=false` mientras la hora este abierta. Una hora cerrada aun no agregada se
+calcula igual en lectura y declara `complete` segun su cobertura real. Si una ventana
+no tiene rollup ni raw, permanece como hueco.
+
 El limite es 10000 puntos por serie despues de seleccionar resolucion y combinar
 fuentes. Si cualquier serie lo supera, la consulta completa responde `422` con codigo
 `point_limit_exceeded`; no devuelve una respuesta truncada. El cliente debe acotar el
@@ -218,34 +227,49 @@ rango o solicitar `hourly`.
 - `POST /api/v1/checks/{id}/disable`
 - `POST /api/v1/checks/{id}/restore`
 - `POST /api/v1/checks/{id}/run`
+- `GET /api/v1/checks/{id}/runs?from=&to=&cursor=`
 - `GET /api/v1/checks/{id}/runs/{run_id}`
-- `GET /api/v1/checks/{id}/results?from=&to=&resolution=auto&source=scheduled`
+- `GET /api/v1/checks/{id}/results?from=&to=&resolution=auto`
 
-`run` programa ejecucion y devuelve `202` con `{ "run_id": "id", "status": "queued" }`;
-no mantiene request HTTP abierto esperando red destino. El resultado se consulta por
-`run_id`. Los resultados tienen `source=scheduled|manual`; por default, `results` y
-las alertas usan solo `scheduled`. Una ejecucion manual se muestra separadamente y no
-cambia estado derivado, series programadas ni alertas. Un resultado tiene esta forma
-conceptual:
+`run` recibe `{ "request_id": "client-generated-opaque-id" }`, programa ejecucion y
+devuelve `202` con `{ "run_id": "id", "status": "queued" }`; no mantiene request HTTP
+abierto esperando red destino. Repetir el mismo `request_id` para el mismo check
+devuelve el mismo `run_id` sin crear otra ejecucion. El resultado se consulta por
+`run_id`. `runs` lista exclusivamente ejecuciones manuales como objetos paginados, sin
+rollups ni parametro de resolucion. `results` expone exclusivamente series scheduled.
+Una ejecucion manual se muestra separadamente y no cambia estado derivado, series
+programadas ni alertas. Un `CheckRun` completado tiene esta forma conceptual:
 
 ```json
 {
-  "id": "opaque-id",
-  "source": "scheduled",
-  "status": "up",
-  "latency_ms": 42,
-  "received_at": "2026-07-15T12:00:00Z",
-  "error_code": null,
-  "http_status": 204
+  "run_id": "opaque-id",
+  "state": "completed",
+  "requested_at": "2026-07-15T11:59:59Z",
+  "completed_at": "2026-07-15T12:00:00Z",
+  "result": {
+    "status": "up",
+    "latency_ms": 42,
+    "error_code": null,
+    "http_status": 204
+  }
 }
 ```
 
-El estado de una ejecucion asincrona es `queued`, `running`, `completed` o `failed`.
-Las consultas historicas de resultados usan el mismo contrato `raw|hourly|mixed`, la
-resolucion por punto y el limite de 10000 puntos por serie definido para metricas.
-Series expuestas: `availability` como exitos/total por ventana y `latency_ms` con
-`value` promedio, `min` y `max`. En `raw`, cada punto es un resultado programado
-individual.
+El `state` de una ejecucion asincrona es `queued`, `running`, `completed` o `failed`.
+`result` solo aparece en `completed`; un check down sigue siendo una ejecucion
+completada. `failed` se reserva para no poder producir resultado y expone un
+`failure_code` seguro (`internal`, `shutdown`, `check_archived`).
+Las consultas scheduled usan el mismo contrato `raw|hourly|mixed`, manejo del cutoff y
+limite de 10000 puntos por serie definido para metricas. Series expuestas:
+
+- `availability`, unidad `ratio`: cada punto raw usa `value=1` para up y `0` para down.
+  En hourly, `value=successful_count/sample_count` e incluye ambos contadores;
+  `sample_count` cuenta todos los resultados programados completados.
+- `latency_ms`, unidad `milliseconds`: solo incluye checks exitosos con latencia. Raw
+  representa un resultado y hourly expone promedio en `value`, ademas de `min`, `max`
+  y `sample_count` propio de la serie.
+
+Fallos o ventanas sin resultados no se convierten en latencia cero.
 
 Configuracion HTTP:
 
@@ -363,10 +387,15 @@ otro destino se rechaza con `422`. Lecturas devuelven:
 }
 ```
 
-`test` crea entrega persistente marcada como prueba y devuelve `202` con
-`{ "delivery_id": "id", "status": "queued" }`. La entrega se consulta por ID.
-Entregas normales pueden terminar `skipped`; la respuesta incluye una razon estable y
-no expone configuracion secreta del canal.
+`test` recibe `{ "request_id": "client-generated-opaque-id" }`, crea una entrega
+persistente con `kind=test` y devuelve `202` con
+`{ "delivery_id": "id", "status": "queued" }`. Repetir el mismo `request_id` para el
+mismo canal devuelve la misma entrega; otro ID crea una prueba nueva. La entrega se
+consulta por ID.
+Entregas `incident` y `test` pueden terminar `skipped`; la respuesta incluye una razon
+estable y no expone configuracion secreta del canal. Antes de cada claim, el worker
+revalida que el canal siga habilitado y no archivado; en caso contrario marca
+`skipped` sin red.
 
 ## 8. Configuracion general
 
@@ -390,8 +419,8 @@ Rangos:
 
 Intervalos nuevos aplican al primer slot que se cree despues del cambio. Cada slot
 conserva intervalo y timeout efectivos; el cambio no modifica slots ni deadlines ya
-emitidos. Aumentar
-retencion no reconstruye datos ya eliminados. Reducir retencion aplica en siguiente
+emitidos. Aumentar retencion no reconstruye datos ya eliminados. Reducir retencion
+aplica en siguiente
 job y UI debe advertir que es irreversible. CIDRs se expresan en notacion CIDR y no
 pueden incluir rangos siempre bloqueados. Cada ejecucion resuelve DNS y exige que todas
 las IPs resultantes cumplan la politica; redirects HTTP se validan de nuevo.
@@ -443,6 +472,9 @@ Respuesta conceptual:
     {
       "mount_point": "/",
       "device": "/dev/sda1",
+      "fs_uuid": "a1b2c3d4",
+      "mount_root": "/",
+      "major_minor": "8:1",
       "fs_type": "ext4",
       "used_bytes": 1024,
       "total_bytes": 4096,
@@ -451,6 +483,13 @@ Respuesta conceptual:
   ]
 }
 ```
+
+`fs_uuid` es nullable. Agente lo obtiene sin ejecutar comandos privilegiados cuando
+puede correlacionar el dispositivo con identificadores expuestos por Linux. Servidor
+usa UUID, `mount_root` y mount point como identidad preferida; si falta, aplica el
+fallback documentado en el modelo de dominio sin fusionar entidades por heuristica.
+`major_minor` es diagnostico y apoya la normalizacion del dispositivo del fallback; no
+forma parte de la identidad.
 
 CPU se calcula en agente desde dos lecturas de `/proc/stat` separadas por 250 ms:
 `100 * (delta_total - delta_idle - delta_iowait) / delta_total`. Memoria usada es

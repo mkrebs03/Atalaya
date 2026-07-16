@@ -169,7 +169,8 @@ El sistema DEBE:
   `discord.com` y path exacto `/api/webhooks/{id}/{token}`, sin userinfo, query,
   fragment ni puerto distinto de 443.
 - Permitir archivar y restaurar canales. Un canal archivado no recibe entregas nuevas,
-  pero conserva su historial.
+  pero conserva su historial. Entregas pendientes no reclamadas pasan a `skipped`; un
+  request ya iniciado puede terminar y no se reintenta despues del cambio.
 
 ### 4.7 Autenticacion
 
@@ -206,6 +207,7 @@ atalaya admin create
 atalaya admin reset-password
 atalaya migrate
 atalaya backup
+atalaya backup-key
 atalaya verify
 atalaya version
 ```
@@ -219,6 +221,10 @@ El instalador DEBE:
 - Instalar y arrancar unidades `systemd` para rol server o agent. En Oracle, instalar
   el rol server configura tambien el agente local, su credencial y su unidad.
 - Ser repetible sin destruir configuracion ni datos existentes.
+
+`atalaya backup` DEBE excluir la clave maestra. La clave se exporta mediante
+`atalaya backup-key` y ambos artefactos deben custodiarse por separado; restaurar
+secretos requiere los dos.
 
 Tailscale instalado, autenticado y conectado es una precondicion. HTTPS se publica
 dentro de la tailnet mediante Tailscale Serve segun
@@ -288,7 +294,8 @@ v1 se considera completa cuando:
     expiracion, historico e incidentes.
 13. Jobs de agregacion y retencion mantienen limites configurados.
 14. UI funciona en escritorio y telefono sin ocultar estados criticos.
-15. Backup y restauracion documentados recuperan una instancia funcional.
+15. Backup de datos y clave exportada por separado recuperan una instancia funcional
+    sin incluir `master.key` en el archivo de datos.
 
 ## 9. Documentos relacionados
 

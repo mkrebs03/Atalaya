@@ -62,7 +62,8 @@ Objetivo: compilar frontend y backend en ejecutable unico reproducible.
 
 Trabajo:
 
-- Inicializar modulo Go y aplicacion Vue 3/TypeScript/Vite.
+- Inicializar modulo Go `github.com/mkrebs03/atalaya` y aplicacion Vue
+  3/TypeScript/Vite.
 - Configurar TypeScript estricto, lint y formato.
 - Crear CLI con `server`, `agent` y `version`, aunque agent solo pueda mostrar error
   de no implementado durante esta fase.
@@ -92,6 +93,8 @@ Trabajo:
 - Implementar clave maestra y cifrado versionado con tests.
 - Implementar `admin create` y `admin reset-password`.
 - Implementar Argon2id, sesiones hasheadas, cookies y CSRF.
+- Persistir `remote_addr` observado y metadata proxy solo como informacion nullable,
+  sin atribuir una IP tailnet ni usarla para auth.
 - Crear login, logout, `auth/me` y cambio de password.
 - Proteger rutas API y fallback SPA.
 - Agregar layout Vue autenticado y manejo global de 401/403.
@@ -117,15 +120,17 @@ Trabajo:
 - Implementar recoleccion Linux de CPU, memoria, uptime, boot ID y filesystems.
 - Implementar consulta segura del estado Tailscale.
 - Implementar filtro de pseudo-filesystems y tests con fixtures Linux.
+- Recolectar UUID, mount root y major:minor cuando Linux los exponga; implementar la
+  identidad UUID-first y fallback sin fusion heuristica.
 - Implementar listener del agente y bearer por agente.
 - Implementar tokens de enrolamiento desde API/UI.
 - Implementar enrolamiento idempotente y persistencia `0600` en agente.
 - Implementar scheduler pull, timeouts, jitter y limite de concurrencia.
 - Capturar intervalo/timeout por schedule, limitar jitter a 5 segundos y calcular
   frescura con `received_at`, jitter y margen operativo adicional de 5 segundos.
-- Persistir periodos de schedule y deadlines de slots fallidos activos; el resto de
-  slots se deriva del periodo, de modo que cambios futuros no reinterpreten deadlines
-  ni cobertura historica.
+- Persistir `SchedulePeriod` y un `ScheduleSlot` no terminal por target con identidad,
+  tiempos efectivos, lease y estado. Resultado scheduled, finalizacion y creacion del
+  siguiente slot comparten transaccion y unicidad por `slot_id`.
 - Crear el comando idempotente `atalaya bootstrap local-agent`, independiente del
   instalador, para crear host Oracle, credencial cifrada y config local sin token UI.
 - Persistir snapshot actual, fallos consecutivos y estado derivado.
@@ -142,6 +147,12 @@ Condiciones de salida:
 - Agente funciona sin root en distribucion Linux objetivo.
 - Payload malicioso o excesivo se rechaza sin afectar scheduler.
 - Cambiar intervalo no altera frescura ni deadlines de schedules ya creados.
+- Restart recupera el slot persistido sin duplicar resultado ni ejecutar catch-up en
+  cascada; lease vencido permite retry y solo crea un siguiente slot futuro.
+- Desactivar durante una ejecucion cancela su slot al finalizar, sin actualizar estado,
+  series o alertas ni reactivar scheduling.
+- Cambio de nombre de dispositivo con UUID estable conserva filesystem e historico;
+  fallback cambiado crea otra entidad sin mezclar series.
 - `atalaya bootstrap local-agent` puede repetirse sin duplicar host ni rotar secreto.
 
 ## 6. Fase 3 - Series, graficos y retencion
@@ -153,6 +164,8 @@ Trabajo:
 - Persistir muestras crudas normalizadas durante pull.
 - Crear consultas por rango y resolucion automatica, incluyendo `resolution=mixed` y
   resolucion explicita por punto al cruzar el cutoff raw.
+- Rechazar `raw` fuera de retencion con `raw_not_available` y calcular hourly en
+  lectura para horas abiertas o aun no agregadas que conservan raw.
 - Definir buckets horarios semiabiertos, cobertura y limite de 10000 puntos por serie.
 - Consumir los periodos de schedule para calcular cobertura cuando cambia el intervalo.
 - Implementar rollups horarios idempotentes.
@@ -169,6 +182,8 @@ Condiciones de salida:
 - Cambio de intervalo dentro de una hora calcula cobertura por segmentos; si falta
   historia, omite expected count y marca rollup parcial.
 - Consulta que supera 10000 puntos en cualquier serie responde 422 sin truncar.
+- Consulta raw fuera del cutoff no devuelve una ventana parcial; hora abierta hourly
+  queda marcada incompleta y no se persiste como rollup definitivo.
 - Grafico diferencia ausencia de dato de valor cero.
 - 90 dias con defaults permanece dentro de limites de respuesta definidos.
 - Tests usan reloj inyectable; no dependen de esperas reales.
@@ -186,8 +201,10 @@ Trabajo:
 - Implementar TCP connect.
 - Aplicar validacion SSRF antes de cada conexion/redirect; solo Tailscale y CIDRs
   privados autorizados, nunca destinos publicos por default.
-- Persistir resultados con `source=scheduled|manual`; manual no cambia estado, series ni
-  alertas.
+- Persistir resultados scheduled por `slot_id` y runs manuales en `CheckRun`; manual
+  no cambia estado, series ni alertas.
+- Exponer series scheduled de availability/latency con unidades y contadores definidos,
+  y listar runs manuales por separado sin resolucion ni rollups.
 - Crear vistas de lista, detalle y ejecucion manual asincrona.
 
 Condiciones de salida:
@@ -198,7 +215,10 @@ Condiciones de salida:
   rechazan.
 - Cuerpo HTTP y URLs sensibles no se persisten ni registran.
 - Desactivar check detiene scheduling sin borrar historico.
-- `run` devuelve ID consultable y resultados manuales quedan separados.
+- `run` devuelve ID consultable, es idempotente por `request_id` y los resultados
+  manuales quedan separados.
+- Availability raw usa 0/1 y hourly coincide con exitos/total; fallos no generan
+  latencia cero.
 
 ## 8. Fase 5 - Alertas y Discord
 
@@ -215,7 +235,10 @@ Trabajo:
   query, fragment ni puerto no estandar.
 - Implementar outbox, reintentos con backoff, deduplicacion, destinos capturados al
   abrir incidente y estado terminal `skipped`.
-- Implementar test de canal asincrono.
+- Implementar entregas `kind=incident|test`, idempotencia de test por
+  canal/`test_request_id` y test asincrono.
+- Revalidar estado del canal en la transaccion de claim; canales inactivos convierten
+  pendientes en `skipped` antes de iniciar red.
 - Mostrar warning/critical en semaforo global.
 
 Condiciones de salida:
@@ -225,6 +248,8 @@ Condiciones de salida:
 - Recuperacion cierra mismo incidente y genera una entrega por canal.
 - Canales agregados a mitad de incidente no reciben solo la resolucion; canales
   inactivos producen entregas `skipped` auditables sin bloquear el orden.
+- Repetir un test con mismo request ID no duplica entrega; archivar un canal detiene
+  pendientes no reclamadas y no cancela a mitad un request ya `sending`.
 - Reinicio entre persistencia y envio no pierde ni duplica entrega logica.
 - Webhook no aparece en API, DB en claro, logs ni errores.
 - Fallo de Discord no bloquea nuevas evaluaciones.
@@ -241,8 +266,8 @@ Trabajo:
   rutas y fallar ante version incompatible, sin fallback silencioso de puerto.
 - Hacer que el rol server invoque `atalaya bootstrap local-agent` antes de instalar la
   unidad local del agente.
-- Crear comandos `backup`, `verify` y `migrate`; documentar restauracion como
-  procedimiento operativo verificable.
+- Crear comandos `backup`, `backup-key`, `verify` y `migrate`; backup de datos excluye
+  la clave y la restauracion exige su artefacto separado.
 - Crear `atalaya verify` para validar config, schema, acceso DB y descifrado antes de
   confirmar upgrade.
 - Crear flujo de upgrade con backup y rollback de binario.
@@ -261,6 +286,8 @@ Condiciones de salida:
 - Upgrade solo descarta rollback despues de `/healthz` y `atalaya verify` exitosos.
 - `atalaya backup` crea backup consistente y la restauracion documentada pasa `verify`
   antes de iniciar.
+- Backup de datos no contiene `master.key`; export de clave preserva `0600` y rechaza
+  compartir output con el archivo de datos.
 - Servicios no ejecutan como root y reinician tras reboot.
 
 ## 10. Fase 7 - Cierre v1
@@ -290,6 +317,7 @@ Condiciones de salida:
 
 - Parsers Linux, calculos de CPU/memoria y filtros de filesystem.
 - Maquinas de estados y thresholds.
+- Slots, leases vencidos, restart, unicidad por `slot_id` y cambios de intervalo.
 - Crypto, tokens, redaccion y validacion SSRF.
 - Rollups por segmentos, fronteras temporales, `received_at`, intervalo efectivo y
   expiracion de frescura.
@@ -301,7 +329,9 @@ Condiciones de salida:
 - HTTP handlers con servidor de prueba.
 - Agente y servidor con certificados/control de auth.
 - Enrolamiento local de Oracle y replay exacto sin duplicar host o credencial.
+- Identidad de filesystem con UUID y fallback ante device/mount changes.
 - Discord mediante fake server que capture payloads.
+- Entregas de test sin incidente, replay idempotente y canal archivado antes del claim.
 - URLs Discord malformadas o con host parecido se rechazan antes de cualquier egress.
 - DNS/dialers inyectados para validar SSRF sin depender de red publica.
 - Ejecuciones manuales separadas de resultados programados y operaciones `202` con ID.
@@ -311,6 +341,7 @@ Condiciones de salida:
 - Componentes de estados criticos y formularios.
 - Composables API con errores 401/409/422.
 - Respuestas mixtas raw/hourly y error `point_limit_exceeded`.
+- Errores `raw_not_available`, hourly abierto y runs manuales separados.
 - Graficos con huecos y cambio de rango.
 - E2E para login, enrolamiento simulado, check, regla e incidente.
 
@@ -318,7 +349,7 @@ Condiciones de salida:
 
 - Units `systemd` en VM/container de CI compatible cuando sea posible.
 - Instalacion y upgrade sobre directorios temporales o VM efimera.
-- Backup/restauracion, `verify` y rollback con schema incompatible.
+- Backup/restauracion con clave separada, `verify` y rollback con schema incompatible.
 - Build y smoke test de ambas arquitecturas; ejecucion nativa donde CI lo permita.
 
 ## 12. Trabajo futuro separado

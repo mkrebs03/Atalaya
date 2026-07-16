@@ -13,6 +13,8 @@
 Builds fijan Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions` y un lockfile
 npm. La version de Tailscale es una dependencia del sistema: el instalador detecta
 capacidades de la CLI y la version minima soportada se prueba en CI.
+El modulo Go canonico es `github.com/mkrebs03/atalaya`; no depende del nombre comercial
+que pueda adoptar el producto.
 
 Dependencias Go fundacionales aprobadas para v1:
 
@@ -174,18 +176,22 @@ devolver credencial.
 
 ## 6. Flujo de recoleccion
 
-1. Scheduler selecciona hosts `pending` o `active` habilitados cuyo `next_poll_at`
-   vencio.
-2. Reserva host para impedir pulls concurrentes dentro del proceso.
+1. Scheduler reclama con lease el `ScheduleSlot` no terminal del host habilitado cuyo
+   `not_before_at` vencio.
+2. La restriccion unica por target impide dos slots no terminales y el lease impide
+   pulls concurrentes dentro del proceso.
 3. Consulta snapshot con timeout menor que intervalo y jitter maximo de 5 segundos.
 4. Valida version, identidad, timestamp razonable, tipos y limites de payload.
-5. En una transaccion actualiza estado actual y agrega muestras crudas.
-6. Registra exito o fallo y calcula proximo intento con jitter pequeno.
+5. En una transaccion actualiza estado actual, agrega muestras crudas con `slot_id`,
+   completa el slot y, si el target sigue habilitado, crea exactamente un siguiente
+   slot futuro con jitter pequeno.
+6. Libera el lease despues del commit.
 7. Evaluador procesa reglas relacionadas despues de persistencia.
 
 Cada slot programado captura `effective_interval_seconds`,
-`effective_timeout_seconds`, tiempo nominal y `deadline_at` al crearse; cambios
-posteriores no alteran ese intento ni los deadlines ya calculados. Un fallo programado
+`effective_timeout_seconds`, `nominal_at`, `not_before_at` y `deadline_at` al crearse;
+cambios posteriores no alteran ese intento ni los deadlines ya calculados. El slot y
+su lease se persisten antes de iniciar red. Un fallo programado
 completado conserva ultimo snapshot e incrementa fallos
 consecutivos. Intentos manuales, schedules omitidos durante downtime y cancelaciones
 por shutdown no cuentan. Host observado pasa a `unreachable` solo cuando acumula tres
@@ -202,6 +208,19 @@ segundos`, con `jitter_max` de 5 segundos. Despues es stale.
 `last_success_received_at` siempre usa `received_at` del servidor, nunca `observed_at`
 del agente. Cambiar intervalo aplica al primer slot que se cree despues del cambio; no
 modifica un slot ya creado ni recalcula frescura o timestamps historicos.
+
+Tras restart, un slot `running` con lease vencido vuelve a `scheduled`. Si su
+`not_before_at` ya paso y el target sigue habilitado, se ejecuta una sola vez de forma
+inmediata conservando `slot_id`; slots nominales intermedios durante downtime no se
+materializan ni cuentan como fallos. Resultado, finalizacion del slot y creacion del
+siguiente comparten transaccion, y muestras/resultados son unicos por `slot_id`, por lo
+que un retry tras crash no duplica historico ni deja el target sin agenda. El siguiente
+slot se ancla en el momento actual, sin ejecutar una cascada de catch-up.
+
+La transaccion de finalizacion vuelve a leer el estado administrativo. Si el target se
+desactivo o archivo durante la red, marca el slot `cancelled`, descarta ese resultado
+para estado/series/alertas y no crea el siguiente slot. Asi una operacion in-flight no
+revive scheduling despues de una accion administrativa.
 
 Scheduler v1 vive en un proceso. No se diseña coordinacion distribuida porque SQLite y
 alta disponibilidad estan fuera de alcance.

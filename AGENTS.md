@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Atalaya is currently in specification stage; there is no implementation yet. Treat
+Atalaya is in specification stage; there is no implementation yet. Treat
 `spec.md` as the product contract and `docs/README.md` as the technical document
 index and precedence list. Current technical docs live under `docs/`.
 
@@ -34,7 +34,8 @@ keep command references aligned with `docs/implementation-plan.md`.
 
 Use idiomatic Go with small packages and explicit interfaces at module boundaries.
 Prefer the Go standard library unless a dependency demonstrably reduces risk or
-complexity. Frontend code should use Vue 3 Composition API, `<script setup>`,
+complexity. Use `github.com/mkrebs03/atalaya` as the Go module/import prefix.
+Frontend code should use Vue 3 Composition API, `<script setup>`,
 strict TypeScript, Vue Router, and local CSS without a visual framework in v1.
 
 Use descriptive names tied to domain terms: `host`, `snapshot`, `check`, `incident`,
