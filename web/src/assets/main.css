@@ -1,0 +1,78 @@
+:root {
+  --paper: #ece9df;
+  --surface: #f7f4ea;
+  --ink: #161b19;
+  --ink-muted: #555c57;
+  /* Surface orange pairs with ink at 5.07:1; do not use it as text on paper. */
+  --accent-surface: #f2552c;
+  /* Text orange reaches 5.13:1 on paper and 5.66:1 on the raised surface. */
+  --accent-text: #b33118;
+  /* Light orange reaches 6.56:1 on the dark manifest surface. */
+  --accent-on-dark: #ff754f;
+  /* Focus ring reaches 3.69:1 on paper, 4.07:1 on surface, and 3.89:1 on ink. */
+  --focus-ring: #d04a24;
+  --signal: #75a600;
+  --line-strong: #2d332f;
+  --line-soft: #c8c5ba;
+  --font-display: 'Iowan Old Style', 'Baskerville', 'Times New Roman', serif;
+  --font-body: 'Avenir Next', 'Trebuchet MS', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Mono', 'Liberation Mono', monospace;
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: var(--paper);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 20rem;
+  background: var(--paper);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100vh;
+  margin: 0;
+  background-color: var(--paper);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--line-soft) 28%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: clamp(4rem, 8vw, 8rem) 100%;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(a, button, [tabindex]):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
