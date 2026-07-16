@@ -59,11 +59,10 @@ El sistema DEBE:
 - Descubrir filesystems automaticamente, excluyendo filesystems virtuales y
   pseudo-filesystems. El administrador puede habilitar o ignorar mounts desde UI.
 - Conservar ultimo snapshot y momento de ultima comunicacion exitosa.
-- Considerar dato stale cuando `now` supera `last_success_received_at + intervalo
-  efectivo + timeout efectivo + jitter maximo + 5 segundos de margen operativo`.
-  Intervalo y timeout se capturan para cada schedule y no cambian retroactivamente.
-  `received_at` es asignado por el servidor y es la unica referencia para frescura,
-  series y alertas.
+- Al persistir un exito, capturar `freshness_deadline_at` desde el `deadline_at` del
+  primer slot siguiente mas 5 segundos de margen operativo. El dato queda stale al
+  superar esa frontera; fallos, downtime y reanclajes no la avanzan. `received_at`,
+  asignado por el servidor, es el unico timestamp de muestra usado por series y alertas.
 - Marcar un host como no disponible cuando existan tres fallos programados completados
   y se haya alcanzado el deadline del tercer slot fallido, calculado con el intervalo
   efectivo de cada schedule. Para un host nunca observado, el primer slot comienza en
@@ -126,6 +125,10 @@ El sistema DEBE:
 - Mostrar 24 horas inicialmente y permitir consultar 7, 30 y 90 dias.
 - Ejecutar retencion y agregacion sin intervencion manual.
 - Mantener huecos cuando servidor o agente no recolectaron datos.
+- Mantener una cadencia nominal fija mientras un periodo de schedule siga activo. Un
+  slot que ya supero su deadline no se ejecuta despues de un downtime: queda cancelado
+  como `missed_deadline` y el scheduler abre un periodo nuevo anclado al presente, sin
+  materializar intentos intermedios.
 
 Retencion e intervalo son configurables, pero esos valores son defaults soportados y
 probados. La retencion de rollups nunca puede ser menor que la retencion raw. Las
@@ -218,8 +221,10 @@ El instalador DEBE:
 - Verificar checksum o firma del artefacto.
 - Crear usuario, directorios y permisos restringidos.
 - Generar configuracion y clave maestra cuando corresponda.
-- Instalar y arrancar unidades `systemd` para rol server o agent. En Oracle, instalar
-  el rol server configura tambien el agente local, su credencial y su unidad.
+- Instalar y arrancar unidades `systemd` para rol server o agent por default. Un modo
+  explicito `--no-start` permite restaurar, migrar y verificar antes del primer arranque.
+  En Oracle, instalar el rol server configura tambien el agente local, su credencial y
+  su unidad.
 - Ser repetible sin destruir configuracion ni datos existentes.
 
 `atalaya backup` DEBE excluir la clave maestra. La clave se exporta mediante

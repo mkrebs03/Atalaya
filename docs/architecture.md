@@ -11,8 +11,9 @@
 - Tailscale para conectividad privada y resolucion MagicDNS.
 
 Builds fijan Go `1.26.4` y Node.js LTS `24.18.0` mediante `.tool-versions` y un lockfile
-npm. La version de Tailscale es una dependencia del sistema: el instalador detecta
-capacidades de la CLI y la version minima soportada se prueba en CI.
+npm. Tailscale es una dependencia del sistema validada por capacidades: cada release
+prueba en CI la version estable vigente y la version mas antigua incluida en su matriz
+de compatibilidad, sin prometer un minimo global independiente de la release.
 El modulo Go canonico es `github.com/mkrebs03/atalaya`; no depende del nombre comercial
 que pueda adoptar el producto.
 
@@ -74,9 +75,10 @@ coexisten: dashboard en 443 y agente en 9474. Certificados y renovacion pertenec
 Tailscale Serve, no al proyecto.
 
 El puerto HTTPS 9474 es el default fijo de v1 y queda registrado en `agent_url`. El
-instalador verifica que la CLI instalada admita `serve --https=9474`, configura la
-ruta y comprueba el estado efectivo; una version incompatible falla con la version
-minima requerida, sin cambiar silenciosamente de puerto.
+instalador verifica que la CLI instalada pueda publicar simultaneamente HTTPS 443 y
+9474, configura ambas rutas y confirma el estado efectivo. Si falta una capacidad,
+falla mostrando version detectada, operacion no soportada y matriz de compatibilidad de
+la release, sin cambiar silenciosamente de puerto.
 
 El instalador configura ambas rutas cuando instala roles juntos y verifica que el
 listener local no este ocupado. La sintaxis exacta de CLI se adapta a la version de
@@ -183,8 +185,8 @@ devolver credencial.
 3. Consulta snapshot con timeout menor que intervalo y jitter maximo de 5 segundos.
 4. Valida version, identidad, timestamp razonable, tipos y limites de payload.
 5. En una transaccion actualiza estado actual, agrega muestras crudas con `slot_id`,
-   completa el slot y, si el target sigue habilitado, crea exactamente un siguiente
-   slot futuro con jitter pequeno.
+   completa el slot y, si el target sigue habilitado, crea exactamente el siguiente
+   slot de la cadencia nominal con jitter pequeno.
 6. Libera el lease despues del commit.
 7. Evaluador procesa reglas relacionadas despues de persistencia.
 
@@ -193,29 +195,39 @@ Cada slot programado captura `effective_interval_seconds`,
 cambios posteriores no alteran ese intento ni los deadlines ya calculados. El slot y
 su lease se persisten antes de iniciar red. Un fallo programado
 completado conserva ultimo snapshot e incrementa fallos
-consecutivos. Intentos manuales, schedules omitidos durante downtime y cancelaciones
+consecutivos. Intentos manuales, schedules omitidos durante downtime e interrupciones
 por shutdown no cuentan. Host observado pasa a `unreachable` solo cuando acumula tres
 fallos programados y se alcanza el deadline del tercer slot fallido; cada slot usa el
 intervalo que capturo al programarse. Antes queda `degraded`. Para host nunca
 observado, el primer slot parte del enrolamiento. UI muestra edad del dato; nunca
 presenta valor anterior como actual sin advertencia.
 
-Despues de un exito, el scheduler crea el siguiente slot con la configuracion vigente.
-Snapshot/check es fresh hasta el `deadline_at` de ese siguiente slot mas 5 segundos de
-margen operativo; equivalentemente,
-`last_success_received_at + effective_interval + effective_timeout + jitter_max + 5
-segundos`, con `jitter_max` de 5 segundos. Despues es stale.
-`last_success_received_at` siempre usa `received_at` del servidor, nunca `observed_at`
-del agente. Cambiar intervalo aplica al primer slot que se cree despues del cambio; no
-modifica un slot ya creado ni recalcula frescura o timestamps historicos.
+Despues de un exito o fallo completado dentro de su deadline, el scheduler crea el
+siguiente slot con
+`nominal_at = previous.nominal_at + previous.effective_interval`, usando la
+configuracion vigente en esa frontera. Solo un exito actualiza
+`freshness_deadline_at = next_slot.deadline_at + 5 segundos`; fallos, downtime y
+reanclajes no prolongan la frescura del ultimo valor. `last_success_received_at` siempre
+usa `received_at` del servidor, nunca `observed_at` del agente; es el timestamp de la
+muestra, no el ancla de la cadencia. Cambiar intervalo aplica al primer slot que se cree
+despues del cambio; no modifica un slot ya creado ni recalcula frescura o timestamps
+historicos.
 
-Tras restart, un slot `running` con lease vencido vuelve a `scheduled`. Si su
-`not_before_at` ya paso y el target sigue habilitado, se ejecuta una sola vez de forma
-inmediata conservando `slot_id`; slots nominales intermedios durante downtime no se
-materializan ni cuentan como fallos. Resultado, finalizacion del slot y creacion del
-siguiente comparten transaccion, y muestras/resultados son unicos por `slot_id`, por lo
-que un retry tras crash no duplica historico ni deja el target sin agenda. El siguiente
-slot se ancla en el momento actual, sin ejecutar una cascada de catch-up.
+Tras restart, un slot `running` con lease vencido vuelve a `scheduled`. Si `now` no
+supera su `deadline_at` y el target sigue habilitado, se reintenta una sola vez
+conservando `slot_id`. Si el deadline ya paso, no inicia red: lo cancela con razon
+`missed_deadline`, cierra el periodo en
+`min(now, expired.nominal_at + effective_interval)` y abre un periodo con un slot
+inmediato anclado en `now` y la configuracion vigente.
+Slots nominales del hueco no se materializan, no cuentan como fallos ni como muestras
+esperadas. El slot vencido ya emitido permanece esperado y deja un hueco de cobertura.
+Resultado, finalizacion y siguiente slot comparten transaccion, y muestras/resultados
+son unicos por `slot_id`, por lo que un retry tras crash no duplica historico ni deja el
+target sin agenda.
+
+Un shutdown no convierte por si solo un intento en fallo terminal: libera el lease o
+permite que venza para aplicar la recuperacion anterior. Cancelaciones administrativas
+persisten razon `target_disabled` o `target_archived`.
 
 La transaccion de finalizacion vuelve a leer el estado administrativo. Si el target se
 desactivo o archivo durante la red, marca el slot `cancelled`, descarta ese resultado
@@ -248,7 +260,8 @@ nuevo.
 
 No se agrega broker externo. Trabajo asincrono usa workers acotados y tablas SQLite:
 
-- Pulls y checks pueden reintentarse desde scheduler en memoria.
+- Pulls y checks programados usan `ScheduleSlot` persistente.
+- Checks manuales usan `CheckRun` persistente con claim y lease recuperable.
 - Notificaciones usan outbox persistente para sobrevivir reinicios.
 - Rollups y retencion usan jobs idempotentes con marca de progreso.
 

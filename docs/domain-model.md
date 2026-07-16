@@ -50,14 +50,14 @@ autenticado puede emitir una sesion nueva para el request actual.
   recuperarse mediante restauracion administrativa.
 - Estado observado derivado: `unknown`, `healthy`, `degraded`, `unreachable`.
 - Intervalo, timeout, ultimo intento, ultimo exito y fallos consecutivos.
-- Intervalo y timeout efectivos del siguiente slot creado tras el ultimo exito, que
-  determinan la frescura, mas deadlines de los slots fallidos activos. Un cambio de
-  configuracion no reescribe esos valores.
+- `freshness_deadline_at`, capturado solo al persistir un exito como deadline del primer
+  slot siguiente mas 5 segundos. Fallos y reanclajes no lo avanzan. Un cambio de
+  configuracion no reescribe ese valor.
 - Credencial de agente cifrada y version de protocolo observada.
 
 `unreachable` requiere tres intentos programados fallidos consecutivos y alcanzar el
 deadline del tercer slot; cada slot conserva su intervalo efectivo. No cuentan
-ejecuciones manuales, schedules omitidos ni cancelaciones por shutdown. No prueba si
+ejecuciones manuales, schedules omitidos ni interrupciones por shutdown. No prueba si
 causa es host, agente, Tailscale o red.
 
 ### EnrollmentToken
@@ -112,6 +112,8 @@ similares se excluyen por default. Exclusion exacta es lista versionada y testea
 - Configuracion tipada por clase de check.
 - Estado actual derivado: `unknown`, `up`, `down`.
 - Ultimo intento, ultimo exito, latencia y error normalizado.
+- `freshness_deadline_at` con la misma semantica que host; solo un resultado programado
+  exitoso lo actualiza.
 
 Relacion con host es organizativa; check siempre se ejecuta desde servidor.
 
@@ -120,23 +122,42 @@ Relacion con host es organizativa; check siempre se ejecuta desde servidor.
 Ejecucion manual asincrona separada del scheduling:
 
 - `id`, check, `request_id` de cliente unico por check para idempotencia de creacion,
-  estado `queued|running|completed|failed`, solicitud, inicio y fin.
+  estado `queued|running|completed|failed`, solicitud, inicio, fin, `lease_until` y
+  contador de intentos de proceso.
+- Snapshot inmutable de tipo, destino, timeout, rango esperado y politica de redirects
+  vigente al crear el run; todos los intentos usan ese mismo snapshot.
 - Resultado normalizado solo en `completed`: up/down, latencia, categoria de error y
-  status HTTP. `failed` usa un codigo operativo seguro (`internal`, `shutdown`,
-  `check_archived`) y no representa check down.
+  status HTTP. `failed` usa un codigo operativo seguro (`internal`,
+  `retry_exhausted`, `check_archived`) y no representa check down.
 - Nunca referencia `ScheduleSlot`, alimenta rollups, cambia estado actual ni evalua
   alertas.
+
+Un worker reclama `queued` en una transaccion, cambia a `running` y toma un lease de
+`timeout efectivo + 5 segundos`. Un lease vencido vuelve a `queued` si queda el segundo
+y ultimo intento; despues termina `failed` con `retry_exhausted`. El claim vuelve a
+leer el check: desactivado permite diagnostico manual, mientras archivado termina
+`failed` con `check_archived`. Si se archiva durante la red, el request en curso puede
+persistir su resultado, pero no se reintenta. Un crash despues de la red y antes del
+commit puede repetir una consulta HTTP GET o conexion TCP; la identidad de `CheckRun`
+es unica, pero v1 no promete exactly-once en la red.
 
 ### SchedulePeriod
 
 Historia de scheduling compartida por hosts y checks:
 
 - Tipo e ID del target, `starts_at`, `ends_at` nullable, intervalo y timeout efectivos.
+  El rango es semiabierto y sus slots siguen
+  `nominal_at = starts_at + n * effective_interval`.
 - Habilitar un target abre un periodo; cambiar intervalo/timeout cierra el vigente y
   abre otro en la frontera del siguiente schedule; desactivar o archivar lo cierra.
 - Los slots nominales derivados del periodo permiten calcular deadlines y muestras
   esperadas sin reinterpretar el pasado con configuracion actual, usando las mismas
   formulas de `not_before_at` y `deadline_at` definidas en `ScheduleSlot`.
+- Si un slot emitido vence durante downtime, el periodo termina en
+  `min(now, expired.nominal_at + effective_interval)`: conserva ese slot como esperado,
+  evita solapamiento y excluye todos los nominales posteriores. Un periodo nuevo
+  comienza en `now` con la configuracion vigente; el intervalo entre ambos periodos no
+  genera expected count.
 
 ### ScheduleSlot
 
@@ -149,16 +170,21 @@ Unidad persistida de ejecucion para host o check:
   `nominal_at + jitter maximo (5 segundos) + timeout efectivo`.
 - Estado `scheduled`, `running`, `succeeded`, `failed` o `cancelled`; `running` guarda
   un lease de `timeout efectivo + 5 segundos de margen` y contador de intentos de
-  proceso.
+  proceso. `cancelled` exige razon `missed_deadline`, `target_disabled` o
+  `target_archived`.
 - Restriccion unica permite como maximo un slot no terminal por target.
 - Resultado scheduled, finalizacion y siguiente slot se escriben en la misma
   transaccion; cada resultado o conjunto de muestras referencia `slot_id` con unicidad
   para evitar duplicados o targets habilitados sin agenda.
 
-En restart, un lease vencido vuelve a `scheduled`. Se ejecuta como maximo el slot
-persistido vencido; slots nominales intermedios por downtime no se materializan ni
-cuentan como fallos. Al terminar se crea en la misma transaccion un unico slot futuro,
-sin catch-up en cascada.
+En operacion normal, el siguiente slot conserva la cadencia con
+`nominal_at = previous.nominal_at + previous.effective_interval`. En restart, un lease
+vencido vuelve a `scheduled` y solo se reintenta mientras `now <= deadline_at`. Despues se
+cancela como `missed_deadline`, se cierra el periodo y se crea en la misma transaccion
+un periodo y slot nuevos anclados en `now`, sin catch-up. El slot vencido permanece en
+la cobertura esperada; nominales posteriores del downtime no se materializan, no son
+esperados y no cuentan como fallos. Shutdown libera o deja vencer el lease, sin crear
+un fallo programado.
 Desactivar o archivar cancela el slot no iniciado; una ejecucion de red ya reclamada
 puede finalizar, pero la transaccion la marca `cancelled`, no incorpora su resultado a
 estado/series/alertas y no crea otro slot.
@@ -184,14 +210,21 @@ Por hora UTC y serie:
 
 - `min`, `max`, `avg`, `count` para valores numericos.
 - Disponibilidad como exitos/total para checks.
-- Cantidad esperada igual al numero de slots nominales de `SchedulePeriod` dentro de la
-  ventana y flag de ventana completa. Periodos desactivados o archivados no generan
-  muestras esperadas; cada segmento usa su propio intervalo.
+- Valores y `count` se asignan a la ventana de `received_at`. Cobertura guarda por
+  separado `expected_sample_count`, derivado de slots nominales de `SchedulePeriod`, y
+  `covered_slot_count`, satisfecho por muestras/resultados que referencian esos
+  `slot_id`. Periodos desactivados o archivados no generan muestras esperadas; cada
+  segmento usa su propio intervalo.
+- `complete` exige hora cerrada y todos los slots esperados cubiertos; no compara
+  `count` con expected. Una muestra recibida cruzando la hora satisface cobertura de su
+  slot nominal, pero su valor se agrega en la hora de `received_at`.
+- Series intencionalmente dispersas, como latencia de checks que solo existe en exitos,
+  omiten cobertura; availability conserva la cobertura del check.
 - Inicio y fin de ventana.
 
 Claves unicas impiden duplicados. Recalcular una ventana produce mismo resultado.
 Si falta historia suficiente para reconstruir algun segmento, `expected_sample_count`
-se omite y `complete=false`; no se inventa cobertura.
+y `covered_slot_count` se omiten y `complete=false`; no se inventa cobertura.
 
 ### AlertRule
 
@@ -246,7 +279,8 @@ identidad y no se eliminan al archivar configuracion.
 
 Outbox persistente:
 
-- `kind` (`incident` o `test`), canal y payload renderizable sin secreto.
+- `kind` (`incident` o `test`), canal y payload final ya renderizado, inmutable y sin
+  secreto. Reintentos usan exactamente el mismo cuerpo y metadata no secreta.
 - Para `incident`, incidente y transicion `firing|resolved` obligatorios. Para `test`,
   ambos son null y `test_request_id` es obligatorio.
 - Estado `pending`, `sending`, `delivered`, `failed`, `skipped`.
@@ -279,6 +313,12 @@ puede extender espera hasta 2 horas. HTTP 429 y 5xx son reintentables; errores 4
 permanentes terminan `failed`. Por incidente/canal, entrega `resolved` espera que
 `firing` termine `delivered`, `failed` o `skipped`, preservando orden sin quedar
 bloqueada por una entrega inexistente.
+
+Cada intento Discord usa timeout HTTP total de 15 segundos, no sigue redirects y
+revalida la URL exacta antes de abrir conexion. El timeout queda por debajo del lease
+para que dos workers no envien concurrentemente. Un crash despues de que Discord
+acepte el request pero antes del commit puede producir un reenvio: la entrega logica
+sigue deduplicada, pero v1 no promete exactly-once frente al proveedor.
 
 ## 3. Transiciones
 
@@ -348,6 +388,9 @@ Defaults:
 - Runs manuales (`CheckRun`): 90 dias por default.
 - Slots de schedule terminales: misma retencion que las muestras crudas. Se conservan
   siempre los slots fallidos activos y el ultimo slot exitoso por target.
+- Periodos de schedule: sin expiracion automatica en v1. Su volumen es acotado por
+  cambios administrativos y reanclajes, y conservarlos evita romper cobertura o claves
+  foraneas de slots retenidos.
 - Sesiones expiradas y tokens consumidos: limpieza periodica tras 30 dias.
 
 Orden seguro del job:

@@ -126,11 +126,13 @@ Trabajo:
 - Implementar tokens de enrolamiento desde API/UI.
 - Implementar enrolamiento idempotente y persistencia `0600` en agente.
 - Implementar scheduler pull, timeouts, jitter y limite de concurrencia.
-- Capturar intervalo/timeout por schedule, limitar jitter a 5 segundos y calcular
-  frescura con `received_at`, jitter y margen operativo adicional de 5 segundos.
+- Capturar intervalo/timeout por schedule, limitar jitter a 5 segundos y actualizar
+  `freshness_deadline_at` solo tras exito desde el siguiente deadline mas 5 segundos.
 - Persistir `SchedulePeriod` y un `ScheduleSlot` no terminal por target con identidad,
   tiempos efectivos, lease y estado. Resultado scheduled, finalizacion y creacion del
   siguiente slot comparten transaccion y unicidad por `slot_id`.
+- Mantener cadencia nominal fija dentro de cada periodo; cancelar con
+  `missed_deadline` y reanclar un periodo nuevo cuando downtime supera el deadline.
 - Crear el comando idempotente `atalaya bootstrap local-agent`, independiente del
   instalador, para crear host Oracle, credencial cifrada y config local sin token UI.
 - Persistir snapshot actual, fallos consecutivos y estado derivado.
@@ -147,8 +149,9 @@ Condiciones de salida:
 - Agente funciona sin root en distribucion Linux objetivo.
 - Payload malicioso o excesivo se rechaza sin afectar scheduler.
 - Cambiar intervalo no altera frescura ni deadlines de schedules ya creados.
-- Restart recupera el slot persistido sin duplicar resultado ni ejecutar catch-up en
-  cascada; lease vencido permite retry y solo crea un siguiente slot futuro.
+- Restart recupera el slot persistido antes de su deadline sin duplicar resultado. Un
+  slot ya vencido no inicia red: queda como hueco esperado, excluye nominales
+  intermedios y crea un periodo nuevo sin catch-up.
 - Desactivar durante una ejecucion cancela su slot al finalizar, sin actualizar estado,
   series o alertas ni reactivar scheduling.
 - Cambio de nombre de dispositivo con UUID estable conserva filesystem e historico;
@@ -168,6 +171,8 @@ Trabajo:
   lectura para horas abiertas o aun no agregadas que conservan raw.
 - Definir buckets horarios semiabiertos, cobertura y limite de 10000 puntos por serie.
 - Consumir los periodos de schedule para calcular cobertura cuando cambia el intervalo.
+- Separar agregacion por `received_at` de cobertura por slot nominal y `slot_id`; no
+  inferir `complete` comparando `sample_count` con expected.
 - Implementar rollups horarios idempotentes.
 - Implementar retencion en lotes y marcas de progreso.
 - Exponer API de metricas con limites de rango/puntos.
@@ -181,6 +186,8 @@ Condiciones de salida:
 - Consulta que cruza frontera raw/rollup no duplica puntos.
 - Cambio de intervalo dentro de una hora calcula cobertura por segmentos; si falta
   historia, omite expected count y marca rollup parcial.
+- Muestra que cruza frontera horaria agrega su valor por `received_at`, satisface el
+  slot nominal correcto y no completa o incompleta el bucket equivocado.
 - Consulta que supera 10000 puntos en cualquier serie responde 422 sin truncar.
 - Consulta raw fuera del cutoff no devuelve una ventana parcial; hora abierta hourly
   queda marcada incompleta y no se persiste como rollup definitivo.
@@ -203,6 +210,9 @@ Trabajo:
   privados autorizados, nunca destinos publicos por default.
 - Persistir resultados scheduled por `slot_id` y runs manuales en `CheckRun`; manual
   no cambia estado, series ni alertas.
+- Reclamar `CheckRun` con lease de timeout mas margen, maximo dos intentos de proceso y
+  recuperacion tras restart; capturar configuracion inmutable, permitir run desactivado
+  y rechazar archivado.
 - Exponer series scheduled de availability/latency con unidades y contadores definidos,
   y listar runs manuales por separado sin resolucion ni rollups.
 - Crear vistas de lista, detalle y ejecucion manual asincrona.
@@ -217,6 +227,8 @@ Condiciones de salida:
 - Desactivar check detiene scheduling sin borrar historico.
 - `run` devuelve ID consultable, es idempotente por `request_id` y los resultados
   manuales quedan separados.
+- Lease vencido de run no lo deja en `running`; se recupera o termina
+  `retry_exhausted`, manteniendo el mismo ID.
 - Availability raw usa 0/1 y hourly coincide con exitos/total; fallos no generan
   latencia cero.
 
@@ -239,6 +251,8 @@ Trabajo:
   canal/`test_request_id` y test asincrono.
 - Revalidar estado del canal en la transaccion de claim; canales inactivos convierten
   pendientes en `skipped` antes de iniciar red.
+- Persistir payload final inmutable y enviar Discord sin redirects, con timeout total
+  de 15 segundos menor al lease de 60 segundos.
 - Mostrar warning/critical en semaforo global.
 
 Condiciones de salida:
@@ -251,6 +265,8 @@ Condiciones de salida:
 - Repetir un test con mismo request ID no duplica entrega; archivar un canal detiene
   pendientes no reclamadas y no cancela a mitad un request ya `sending`.
 - Reinicio entre persistencia y envio no pierde ni duplica entrega logica.
+- Redirect de Discord no produce un segundo egress y un request nunca supera el lease;
+  reintentos conservan exactamente el mismo payload.
 - Webhook no aparece en API, DB en claro, logs ni errores.
 - Fallo de Discord no bloquea nuevas evaluaciones.
 
@@ -262,14 +278,17 @@ Trabajo:
 
 - Crear units `systemd` con hardening para server y agent.
 - Crear instalador idempotente con roles y verificacion de checksum.
+- Agregar `--no-start` para restore y migracion offline antes de `verify`.
 - Integrar deteccion/configuracion guiada de Tailscale Serve en 443/9474; verificar
-  rutas y fallar ante version incompatible, sin fallback silencioso de puerto.
+  capacidades y rutas contra la matriz publicada por release, sin fallback silencioso
+  de puerto.
 - Hacer que el rol server invoque `atalaya bootstrap local-agent` antes de instalar la
   unidad local del agente.
 - Crear comandos `backup`, `backup-key`, `verify` y `migrate`; backup de datos excluye
   la clave y la restauracion exige su artefacto separado.
 - Crear `atalaya verify` para validar config, schema, acceso DB y descifrado antes de
   confirmar upgrade.
+- Documentar restore offline en orden `migrate -> verify -> start`.
 - Crear flujo de upgrade con backup y rollback de binario.
 - Publicar artefactos `amd64`/`arm64` y checksums desde CI.
 - Documentar paths, firewall, logs, backup y limitacion watchdog.
@@ -279,6 +298,8 @@ Condiciones de salida:
 
 - VM Linux limpia con Tailscale conectado instala server mediante un comando.
 - Segundo host instala agent y se enrola sin Go/Node/Docker.
+- CLI Tailscale fuera de la matriz o sin rutas 443/9474 concurrentes falla con version
+  detectada y capacidad ausente.
 - Reejecutar instalador no rota claves ni borra config.
 - Backup restaurado conserva login, metricas, reglas y descifra canales.
 - Upgrade fallido restaura como unidad binario y backup pre-migracion; nunca combina
@@ -317,7 +338,9 @@ Condiciones de salida:
 
 - Parsers Linux, calculos de CPU/memoria y filtros de filesystem.
 - Maquinas de estados y thresholds.
-- Slots, leases vencidos, restart, unicidad por `slot_id` y cambios de intervalo.
+- Slots, cadencia nominal, deadlines vencidos, reanclaje, leases, unicidad por `slot_id`
+  y cambios de intervalo.
+- Claims y recuperacion de `CheckRun`, incluyendo archive y agotamiento de intentos.
 - Crypto, tokens, redaccion y validacion SSRF.
 - Rollups por segmentos, fronteras temporales, `received_at`, intervalo efectivo y
   expiracion de frescura.
@@ -332,9 +355,11 @@ Condiciones de salida:
 - Identidad de filesystem con UUID y fallback ante device/mount changes.
 - Discord mediante fake server que capture payloads.
 - Entregas de test sin incidente, replay idempotente y canal archivado antes del claim.
+- Discord sin redirects, timeout menor al lease y payload inmutable entre reintentos.
 - URLs Discord malformadas o con host parecido se rechazan antes de cualquier egress.
 - DNS/dialers inyectados para validar SSRF sin depender de red publica.
 - Ejecuciones manuales separadas de resultados programados y operaciones `202` con ID.
+- Restart durante `CheckRun` recupera lease sin dejar estados `running` permanentes.
 
 ### Frontend
 
@@ -350,6 +375,7 @@ Condiciones de salida:
 - Units `systemd` en VM/container de CI compatible cuando sea posible.
 - Instalacion y upgrade sobre directorios temporales o VM efimera.
 - Backup/restauracion con clave separada, `verify` y rollback con schema incompatible.
+- Matriz Tailscale prueba version estable y mas antigua soportada por cada release.
 - Build y smoke test de ambas arquitecturas; ejecucion nativa donde CI lo permita.
 
 ## 12. Trabajo futuro separado

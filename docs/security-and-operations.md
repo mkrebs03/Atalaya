@@ -26,8 +26,9 @@ No se promete resistir:
   443.
 - Agente escucha en `127.0.0.1:9474` y Tailscale Serve publica ese listener por HTTPS,
   en 9474 como default fijo de v1. Nunca usa `0.0.0.0` por default. El instalador
-  verifica soporte para `serve --https=9474` y falla con la version minima requerida
-  si la CLI no lo admite; no elige otro puerto silenciosamente.
+  verifica que la CLI pueda publicar simultaneamente HTTPS 443 y 9474 y falla mostrando
+  version detectada, capacidad ausente y matriz de compatibilidad de la release si no
+  puede; no elige otro puerto silenciosamente.
 - El backend 9474 permanece en loopback y no se abre en firewall. ACLs/grants de la
   tailnet limitan quien alcanza el endpoint HTTPS publicado por Tailscale Serve.
 - Servidor usa MagicDNS y valida TLS para agentes.
@@ -43,6 +44,12 @@ tailscale serve --bg http://127.0.0.1:8080
 Agente requiere una segunda regla Serve equivalente para su puerto HTTPS. Instalador
 detecta version de CLI y comprueba rutas efectivas; no concatena comandos suponiendo
 una sintaxis fija.
+
+Cada release publica una matriz con la version estable probada y la version mas antigua
+probada. Compatibilidad se decide por las capacidades observadas para configurar 443 y
+9474 simultaneamente y confirmar ambas rutas; no existe un numero minimo global fuera
+de esa matriz. El diagnostico siempre incluye la version detectada y la operacion que
+fallo.
 
 Instalador debe detectar Tailscale desconectado y fallar con instruccion clara, no
 abrir listener publico como fallback.
@@ -139,6 +146,11 @@ segmentos `/api/webhooks/{id}/{token}` no vacios. Se rechazan escapes o segmento
 adicionales al guardar y antes de cada entrega o test. Un `webhook_url` nunca puede
 usarse como proxy hacia la red interna ni hacia destinos arbitrarios.
 
+El adaptador Discord no sigue redirects y usa timeout HTTP total de 15 segundos, menor
+que el lease de entrega de 60 segundos. El payload final se persiste sin secretos al
+crear la entrega y no se vuelve a renderizar durante reintentos. Logs y errores no
+incluyen URL, cuerpo ni headers sensibles.
+
 ## 6. Usuarios y permisos del sistema
 
 Servidor y agente corren como usuarios dedicados sin shell. No corren como root tras
@@ -202,8 +214,9 @@ Procedimiento de restauracion:
 2. Restaurar el backup de datos y una copia separada de la clave maestra con
    propietario/permisos correctos.
 3. Ejecutar verificacion de integridad SQLite.
-4. Instalar version compatible o superior que incluya migraciones.
-5. Iniciar y comprobar `/healthz`, login, hosts y descifrado de canales.
+4. Instalar una version compatible con `--no-start` y ejecutar `atalaya migrate`.
+5. Ejecutar `atalaya verify`; cualquier fallo detiene la restauracion.
+6. Iniciar y comprobar `/healthz`, login, hosts y descifrado de canales.
 
 Antes de cada migracion de upgrade, crear backup automatico local de datos. La clave
 existente no se copia porque v1 no la rota durante migraciones. Retencion de backups
@@ -223,6 +236,8 @@ Instalador:
 
 - Acepta `server`, `agent` y `upgrade`. El rol `server` en Oracle instala tambien el
   agente local y lo registra sin token de UI.
+- Acepta `--no-start` para restore y mantenimiento offline; en ese modo instala
+  artefactos y units, pero no inicia ni reinicia servicios.
 - Descarga por HTTPS y verifica checksum antes de reemplazar binario.
 - Usa archivos temporales y rename atomico.
 - Es idempotente y no sobrescribe secretos existentes.
@@ -236,8 +251,9 @@ Instalador:
 - No ejecuta migracion destructiva sin backup.
 
 `atalaya verify` comprueba config, schema, acceso de lectura y descifrado de secretos.
-La restauracion es un procedimiento documentado: detener servicio, restaurar DB,
-clave y config, ejecutar `atalaya verify`, y arrancar solo con una version compatible.
+La restauracion es un procedimiento documentado: detener servicio, restaurar DB, clave
+y config, comprobar integridad, ejecutar `atalaya migrate`, ejecutar `atalaya verify` y
+solo entonces arrancar una version compatible.
 
 Comando `curl | sh` puede ofrecer conveniencia, pero documentacion tambien debe mostrar
 descarga, inspeccion y ejecucion separadas.

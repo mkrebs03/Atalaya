@@ -54,10 +54,13 @@ Decisiones cerradas:
 - Pull de metricas, intervalo por defecto de 60 segundos.
 - Usuario administrador unico con auth local.
 - Discord como primer adaptador de notificacion.
-- `received_at` del servidor es la referencia unica para frescura, series y alertas.
+- `received_at` del servidor es el unico timestamp de muestra para series y alertas;
+  frescura expira segun `freshness_deadline_at`, capturado solo tras un exito.
 - Scheduling persistente: `SchedulePeriod` conserva la historia usada por cobertura y
   `ScheduleSlot` identifica cada ejecucion emitida; cambios de configuracion no
   reinterpretan slots existentes.
+- Cada periodo usa cadencia nominal fija. Slots que superaron su deadline durante
+  downtime se cancelan y un periodo nuevo se ancla al presente, sin catch-up.
 - `unreachable` requiere tres fallos programados consecutivos y alcanzar el deadline
   del tercer slot fallido.
 - `DELETE` archiva siempre los recursos configurables; no hay borrado fisico desde la
@@ -72,8 +75,8 @@ Decisiones cerradas:
   adquirir el lease.
 - Webhooks Discord se validan con parser estructurado: host y path exactos, sin
   userinfo, query, fragment ni puerto no estandar.
-- Puerto HTTPS 9474 fijo para agentes via Tailscale Serve; version incompatible falla,
-  sin fallback silencioso de puerto.
+- Puerto HTTPS 9474 fijo para agentes via Tailscale Serve; una CLI sin las capacidades
+  requeridas falla con diagnostico, sin fallback silencioso de puerto.
 - Dependencias Go fundacionales: `modernc.org/sqlite`, `golang.org/x/crypto/argon2` y
   `go.yaml.in/yaml/v3`, con builds `CGO_ENABLED=0`.
 - La instalacion server en Oracle configura el agente local mediante el comando

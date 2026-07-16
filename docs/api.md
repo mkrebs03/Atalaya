@@ -185,6 +185,7 @@ al cruzar la frontera de retencion. Los puntos horarios representan
           "min": 8.1,
           "max": 18.4,
           "sample_count": 58,
+          "covered_slot_count": 59,
           "expected_sample_count": 60,
           "complete": false
         }
@@ -195,12 +196,17 @@ al cruzar la frontera de retencion. Los puntos horarios representan
 ```
 
 Para puntos `raw`, `min` y `max` igualan `value`, `sample_count` vale 1 y los campos de
-cobertura pueden omitirse. Para puntos `hourly`, `value` es promedio y cobertura
-permite marcar ventana parcial. Ventana sin muestras no produce punto. En `auto`, cada
-bucket se obtiene de una sola fuente: rollup para ventanas completamente fuera de la
-ventana raw y raw para el tramo reciente. UI no une como continuos puntos separados
-por una ventana ausente y distingue visualmente rollup parcial. No usar cero o `null`
-sintetico como medicion.
+cobertura pueden omitirse. Para puntos `hourly`, valores y `sample_count` agrupan por
+`received_at`; `expected_sample_count` cuenta slots por `nominal_at` y
+`covered_slot_count` cuenta cuales produjeron esa serie mediante `slot_id`. Por ello
+`sample_count` puede diferir de ambos cerca de una frontera horaria. `complete` solo es
+true en una hora cerrada cuando todos los slots esperados estan cubiertos; nunca se
+calcula comparando `sample_count` con `expected_sample_count`.
+
+Ventana sin muestras no produce punto. En `auto`, cada bucket se obtiene de una sola
+fuente: rollup para ventanas completamente fuera de la ventana raw y raw para el tramo
+reciente. UI no une como continuos puntos separados por una ventana ausente y distingue
+visualmente rollup parcial. No usar cero o `null` sintetico como medicion.
 
 `raw` exige que toda la ventana solicitada este dentro de la retencion disponible; si
 `from` es anterior al cutoff responde `422` con codigo `raw_not_available` y
@@ -238,7 +244,18 @@ devuelve el mismo `run_id` sin crear otra ejecucion. El resultado se consulta po
 `run_id`. `runs` lista exclusivamente ejecuciones manuales como objetos paginados, sin
 rollups ni parametro de resolucion. `results` expone exclusivamente series scheduled.
 Una ejecucion manual se muestra separadamente y no cambia estado derivado, series
-programadas ni alertas. Un `CheckRun` completado tiene esta forma conceptual:
+programadas ni alertas.
+
+Al aceptar `run`, el servidor captura la configuracion efectiva del check. Ediciones
+posteriores no cambian el destino, timeout ni politica de redirects de ese run o sus
+reintentos; la politica SSRF se revalida antes de cada conexion.
+
+Un check desactivado acepta `run` para diagnostico manual. Un check ya archivado
+responde `409` con codigo `check_archived`. Si se archiva despues de encolar, el worker
+falla el run antes de iniciar red; si ya estaba `running`, puede completar el intento
+actual, pero no lo reintenta.
+
+Un `CheckRun` completado tiene esta forma conceptual:
 
 ```json
 {
@@ -258,7 +275,9 @@ programadas ni alertas. Un `CheckRun` completado tiene esta forma conceptual:
 El `state` de una ejecucion asincrona es `queued`, `running`, `completed` o `failed`.
 `result` solo aparece en `completed`; un check down sigue siendo una ejecucion
 completada. `failed` se reserva para no poder producir resultado y expone un
-`failure_code` seguro (`internal`, `shutdown`, `check_archived`).
+`failure_code` seguro (`internal`, `retry_exhausted`, `check_archived`). Un worker usa
+lease de `timeout_seconds + 5 segundos` y permite como maximo dos intentos de proceso;
+la API conserva un solo `run_id` aunque un crash obligue a repetir la operacion de red.
 Las consultas scheduled usan el mismo contrato `raw|hourly|mixed`, manejo del cutoff y
 limite de 10000 puntos por serie definido para metricas. Series expuestas:
 
@@ -267,7 +286,9 @@ limite de 10000 puntos por serie definido para metricas. Series expuestas:
   `sample_count` cuenta todos los resultados programados completados.
 - `latency_ms`, unidad `milliseconds`: solo incluye checks exitosos con latencia. Raw
   representa un resultado y hourly expone promedio en `value`, ademas de `min`, `max`
-  y `sample_count` propio de la serie.
+  y `sample_count` propio de la serie. Como es una serie intencionalmente dispersa,
+  omite `expected_sample_count`, `covered_slot_count` y `complete`; la cobertura del
+  check se consulta en `availability`.
 
 Fallos o ventanas sin resultados no se convierten en latencia cero.
 
@@ -419,9 +440,11 @@ Rangos:
 
 Intervalos nuevos aplican al primer slot que se cree despues del cambio. Cada slot
 conserva intervalo y timeout efectivos; el cambio no modifica slots ni deadlines ya
-emitidos. Aumentar retencion no reconstruye datos ya eliminados. Reducir retencion
-aplica en siguiente
-job y UI debe advertir que es irreversible. CIDRs se expresan en notacion CIDR y no
+emitidos. Mientras el periodo siga activo, el siguiente `nominal_at` se calcula desde
+el nominal anterior, no desde `received_at`. Tras downtime, un slot fuera de deadline
+se cancela y abre un periodo nuevo anclado al presente. Aumentar retencion no
+reconstruye datos ya eliminados. Reducir retencion aplica en siguiente job y UI debe
+advertir que es irreversible. CIDRs se expresan en notacion CIDR y no
 pueden incluir rangos siempre bloqueados. Cada ejecucion resuelve DNS y exige que todas
 las IPs resultantes cumplan la politica; redirects HTTP se validan de nuevo.
 
@@ -498,8 +521,9 @@ CPU se calcula en agente desde dos lecturas de `/proc/stat` separadas por 250 ms
 usados de memoria tambien pueden ser `null` como par.
 
 `observed_at` es diagnostico reportado por agente. Servidor agrega `received_at` al
-persistir; frescura, staleness, orden de series y alertas usan exclusivamente
-`received_at`, evitando depender del reloj del host.
+persistir; orden de series y evaluaciones usan ese timestamp, evitando depender del
+reloj del host. Frescura y staleness usan `freshness_deadline_at`, calculado desde el
+primer slot creado despues del ultimo exito y nunca avanzado por un fallo.
 
 Payload tiene limite estricto. Campos nuevos deben ser opcionales dentro de version o
 requieren nueva version incompatible. Servidor acepta versiones explicitamente
