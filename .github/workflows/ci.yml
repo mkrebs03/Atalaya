@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify pinned toolchain
+        run: |
+          test "$(go env GOVERSION)" = "go1.26.5"
+          test "$(node --version)" = "v24.18.0"
+          test "$(npm --version)" = "11.16.0"
+      - run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify pinned toolchain
+        run: |
+          test "$(go env GOVERSION)" = "go1.26.5"
+          test "$(node --version)" = "v24.18.0"
+          test "$(npm --version)" = "11.16.0"
+      - run: make test
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npm exec playwright install --with-deps chromium
+      - name: End-to-end tests
+        env:
+          CI: "true"
+        run: make test-e2e
+
+  cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify pinned toolchain
+        run: |
+          test "$(go env GOVERSION)" = "go1.26.5"
+          test "$(node --version)" = "v24.18.0"
+          test "$(npm --version)" = "11.16.0"
+      - run: make build
