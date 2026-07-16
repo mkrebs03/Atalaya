@@ -143,6 +143,17 @@ func TestVerifyPasswordRejectsNonV1PHCWithoutDeriving(t *testing.T) {
 	}
 }
 
+func TestValidatePasswordHashUsesStrictV1Parser(t *testing.T) {
+	t.Parallel()
+
+	if err := ValidatePasswordHash(testPasswordPHC); err != nil {
+		t.Fatalf("ValidatePasswordHash(valid) error = %v", err)
+	}
+	if err := ValidatePasswordHash(strings.Replace(testPasswordPHC, "p=4", "p=8", 1)); err == nil {
+		t.Fatal("ValidatePasswordHash(non-v1 profile) error = nil")
+	}
+}
+
 func sequentialBytes(length int) []byte {
 	result := make([]byte, length)
 	for index := range result {

@@ -32,6 +32,15 @@ func Seal(key []byte, secretType, entityID string, plaintext []byte) ([]byte, er
 	return seal(key, secretType, entityID, plaintext, cryptorand.Reader)
 }
 
+// SealWithRandom encrypts with an explicit nonce source for deterministic
+// persistence tests. Production callers should use Seal.
+func SealWithRandom(key []byte, secretType, entityID string, plaintext []byte, random io.Reader) ([]byte, error) {
+	if random == nil {
+		return nil, fmt.Errorf("secret nonce source is required")
+	}
+	return seal(key, secretType, entityID, plaintext, random)
+}
+
 func seal(key []byte, secretType, entityID string, plaintext []byte, random io.Reader) ([]byte, error) {
 	gcm, err := newGCM(key)
 	if err != nil {

@@ -83,6 +83,12 @@ func VerifyPassword(encoded string, password []byte) (bool, error) {
 	return subtle.ConstantTimeCompare(actual, expected) == 1, nil
 }
 
+// ValidatePasswordHash accepts only the persisted v1 Argon2id PHC profile.
+func ValidatePasswordHash(encoded string) error {
+	_, _, err := parsePasswordHash(encoded)
+	return err
+}
+
 func parsePasswordHash(encoded string) ([]byte, []byte, error) {
 	expectedLength := len("$argon2id$v=19$m=65536,t=3,p=4$") + strictRawBase64.EncodedLen(passwordSaltSize) + 1 + strictRawBase64.EncodedLen(passwordHashSize)
 	if len(encoded) != expectedLength {
