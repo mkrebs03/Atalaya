@@ -15,9 +15,9 @@ import (
 func TestFailedMigrationRollsBackOnlyItsTransaction(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "database.db")
 	migrations := append([]migration(nil), embeddedMigrations...)
-	migrations = append(migrations, newMigrationWithValidator(2, `
+	migrations = append(migrations, newMigrationWithValidator(3, `
 		CREATE TABLE must_roll_back (id INTEGER);
-		INSERT INTO table_that_does_not_exist(id) VALUES (1);`, validateSchemaV1))
+		INSERT INTO table_that_does_not_exist(id) VALUES (1);`, validateSchemaV2))
 
 	_, err := open(context.Background(), path, testMasterKey(), openOptions{
 		clock:      func() time.Time { return testInstant },
@@ -38,8 +38,8 @@ func TestFailedMigrationRollsBackOnlyItsTransaction(t *testing.T) {
 	).Scan(&rolledBackTable); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 1 || rolledBackTable != 0 {
-		t.Fatalf("after failed v2: migrations = %d, rolled-back table count = %d", migrationCount, rolledBackTable)
+	if migrationCount != 2 || rolledBackTable != 0 {
+		t.Fatalf("after failed v3: migrations = %d, rolled-back table count = %d", migrationCount, rolledBackTable)
 	}
 }
 
@@ -48,7 +48,7 @@ func TestInitialMigrationRollsBackWhenSentinelGenerationFails(t *testing.T) {
 	_, err := open(context.Background(), path, testMasterKey(), openOptions{
 		clock:      func() time.Time { return testInstant },
 		random:     bytes.NewReader(nil),
-		migrations: embeddedMigrations,
+		migrations: embeddedMigrations[:1],
 	})
 	if err == nil {
 		t.Fatal("open() error = nil")
@@ -184,7 +184,7 @@ func TestSchemaValidationTracksAppliedMigrationVersion(t *testing.T) {
 	v1Database, err := open(context.Background(), path, testMasterKey(), openOptions{
 		clock:      func() time.Time { return testInstant },
 		random:     bytes.NewReader(make([]byte, 12)),
-		migrations: embeddedMigrations,
+		migrations: embeddedMigrations[:1],
 	})
 	if err != nil {
 		t.Fatalf("open(v1) error = %v", err)
@@ -206,7 +206,7 @@ func TestSchemaValidationTracksAppliedMigrationVersion(t *testing.T) {
 		}
 		return nil
 	}
-	migrations := append([]migration(nil), embeddedMigrations...)
+	migrations := append([]migration(nil), embeddedMigrations[:1]...)
 	migrations = append(migrations, newMigrationWithValidator(2, `
 		CREATE TABLE migration_v2_marker (
 			id INTEGER PRIMARY KEY,
@@ -276,14 +276,12 @@ func TestValidationRejectsNonContiguousStoredHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "database.db")
 	database := openTestDatabase(t, path)
 	extraMigrations := append([]migration(nil), embeddedMigrations...)
-	extraMigrations = append(
-		extraMigrations,
-		newMigrationWithValidator(2, "SELECT 2", validateSchemaV1),
-		newMigrationWithValidator(3, "SELECT 3", validateSchemaV1),
-	)
+	extraMigrations = append(extraMigrations,
+		newMigrationWithValidator(3, "SELECT 3", validateSchemaV2),
+		newMigrationWithValidator(4, "SELECT 4", validateSchemaV2))
 	if _, err := database.sql.Exec(
-		"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (3, ?, ?)",
-		extraMigrations[2].checksum, testInstant.Format(time.RFC3339Nano),
+		"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (4, ?, ?)",
+		extraMigrations[3].checksum, testInstant.Format(time.RFC3339Nano),
 	); err != nil {
 		t.Fatal(err)
 	}

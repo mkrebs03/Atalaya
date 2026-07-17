@@ -14,6 +14,13 @@
   licencias.
 - [Diseno de Fase 1A](superpowers/specs/2026-07-16-phase-1a-persistence-admin-design.md):
   detalle de implementacion para persistencia segura y administrador inicial.
+- [Diseno de Fase 1B](superpowers/specs/2026-07-17-phase-1b-authentication-design.md):
+  detalle de sesiones, autenticacion HTTP, CSRF y reset local.
+
+La interfaz de Fase 1 mantiene administrador y CSRF exclusivamente en memoria del
+navegador. La cookie `HttpOnly` restaura la sesion tras recargar; no se usa
+`localStorage` ni `sessionStorage`. Las rutas `/`, `/account` y el fallback 404 viven
+bajo el layout autenticado, mientras `/login` es la unica vista publica de la SPA.
 
 ## Autoridad
 
@@ -94,6 +101,8 @@ Decisiones cerradas:
   sin arrancarlo.
 - La Fase 1A de persistencia y administrador inicial usa el diseno subordinado
   [aprobado](superpowers/specs/2026-07-16-phase-1a-persistence-admin-design.md).
+- La Fase 1B de autenticacion del servidor usa el diseno subordinado
+  [aprobado](superpowers/specs/2026-07-17-phase-1b-authentication-design.md).
 - Modo `development` explicito; cookie sin `Secure` solo con listener y origen en
   loopback.
 - `Cache-Control: no-store` en autenticacion y respuestas con secretos efimeros.

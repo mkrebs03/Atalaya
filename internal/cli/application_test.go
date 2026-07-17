@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mkrebs03/atalaya/internal/auth"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
@@ -403,6 +404,54 @@ type fakeDatabase struct {
 	createErr     error
 	closeErr      error
 	closed        bool
+	resetHash     string
+}
+
+func (database *fakeDatabase) FindActiveAdministrator(context.Context, string) (auth.Administrator, error) {
+	return database.administrator, nil
+}
+func (*fakeDatabase) CreateSessionIfAdministratorVersion(context.Context, auth.Session, int) error {
+	return nil
+}
+func (*fakeDatabase) ValidateAndTouchSession(context.Context, []byte, time.Time, time.Time) (auth.Administrator, auth.Session, error) {
+	return auth.Administrator{}, auth.Session{}, auth.ErrAuthenticationRequired
+}
+func (*fakeDatabase) RevokeSession(context.Context, []byte, time.Time) error { return nil }
+func (*fakeDatabase) ChangePasswordAndReplaceSessions(context.Context, string, int, string, time.Time, auth.Session) error {
+	return nil
+}
+func (database *fakeDatabase) ResetPasswordAndRevokeSessions(_ context.Context, hash string, _ time.Time) error {
+	database.resetHash = hash
+	return nil
+}
+
+func TestAdminResetPasswordPreflightsThenRevokesSessions(t *testing.T) {
+	application := testApplication()
+	owner := &fakeDatabase{}
+	application.preflightDatabase = func(context.Context, string, []byte) (database.PreflightResult, error) {
+		return database.PreflightResult{State: database.StateAtalaya, SchemaVersion: 2, HasActiveAdministrator: true}, nil
+	}
+	application.openDatabase = func(context.Context, string, []byte) (databaseHandle, error) { return owner, nil }
+	var stdout, stderr bytes.Buffer
+	if code := application.Run([]string{"admin", "reset-password"}, &stdout, &stderr); code != exitSuccess {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if owner.resetHash != cliTestPasswordPHC || !strings.Contains(stdout.String(), "all sessions revoked") {
+		t.Fatalf("reset = %q, stdout=%q", owner.resetHash, stdout.String())
+	}
+}
+
+func TestAdminResetPasswordDoesNotPromptWithoutAdministrator(t *testing.T) {
+	application := testApplication()
+	prompted := false
+	application.readPassword = func(string, io.Writer) ([]byte, error) { prompted = true; return nil, nil }
+	var stdout, stderr bytes.Buffer
+	if code := application.Run([]string{"admin", "reset-password"}, &stdout, &stderr); code != exitRuntime {
+		t.Fatalf("code=%d", code)
+	}
+	if prompted {
+		t.Fatal("password prompt ran before active-administrator preflight")
+	}
 }
 
 func (database *fakeDatabase) CreateAdministrator(_ context.Context, administrator auth.Administrator) error {

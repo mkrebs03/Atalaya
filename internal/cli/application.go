@@ -47,6 +47,7 @@ type Application struct {
 	openDatabase      func(context.Context, string, []byte) (databaseHandle, error)
 	readPassword      passwordReader
 	hashPassword      passwordHasher
+	assets            fs.FS
 }
 
 // New creates an application backed by the embedded Vue assets.
@@ -56,6 +57,7 @@ func New(assets fs.FS) (Application, error) {
 	}
 	return Application{
 		version: buildinfo.Version,
+		assets:  assets,
 		newHandler: func() (http.Handler, error) {
 			return httpapi.New(assets)
 		},
@@ -176,6 +178,15 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 	clear(key)
 
 	handler, err := application.newHandler()
+	if repository, ok := owner.(auth.Repository); ok && application.assets != nil {
+		service, serviceErr := auth.NewService(repository)
+		if serviceErr != nil {
+			_ = owner.Close()
+			fmt.Fprintf(stderr, "atalaya server: construct authentication service: %v\n", serviceErr)
+			return exitRuntime
+		}
+		handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy})
+	}
 	if err != nil {
 		_ = owner.Close()
 		fmt.Fprintf(stderr, "atalaya server: construct HTTP handler: %v\n", err)
@@ -185,6 +196,7 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 		Listen:          loaded.Listen,
 		Mode:            loaded.Mode,
 		PublicURL:       loaded.PublicURL,
+		TrustedProxy:    loaded.TrustedProxy,
 		ShutdownTimeout: 10 * time.Second,
 	}
 	runErr := application.runServer(ctx, processConfig, handler)
@@ -233,6 +245,8 @@ func (application Application) runAdminCommand(args []string, stdout, stderr io.
 	if containsHelpFlag(args) {
 		if len(args) > 0 && args[0] == "create" {
 			writeAdminCreateUsage(stdout)
+		} else if len(args) > 0 && args[0] == "reset-password" {
+			writeAdminResetPasswordUsage(stdout)
 		} else {
 			writeAdminUsage(stdout)
 		}
@@ -242,11 +256,74 @@ func (application Application) runAdminCommand(args []string, stdout, stderr io.
 		writeAdminUsage(stderr)
 		return exitUsage
 	}
+	if args[0] == "reset-password" {
+		return application.runAdminResetPasswordCommand(args[1:], stdout, stderr)
+	}
 	if args[0] != "create" {
 		fmt.Fprintf(stderr, "atalaya admin: unknown command %q\n", args[0])
 		return exitUsage
 	}
 	return application.runAdminCreateCommand(args[1:], stdout, stderr)
+}
+
+func (application Application) runAdminResetPasswordCommand(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("admin reset-password", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", defaultServerConfigPath, "server YAML configuration path")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *configPath == "" {
+		if err != nil {
+			fmt.Fprintf(stderr, "atalaya admin reset-password: %v\n", err)
+		} else {
+			fmt.Fprintln(stderr, "atalaya admin reset-password: invalid arguments")
+		}
+		return exitUsage
+	}
+	loaded, key, code, ok := application.loadBootstrap("admin reset-password", *configPath, stderr)
+	if !ok {
+		return code
+	}
+	defer clear(key)
+	preflight, err := application.preflightDatabase(context.Background(), loaded.DatabasePath, key)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya admin reset-password: %v\n", err)
+		return exitRuntime
+	}
+	if !preflight.HasActiveAdministrator {
+		fmt.Fprintln(stderr, "atalaya admin reset-password: active administrator is required")
+		return exitRuntime
+	}
+	passwordHash, err := readConfirmedPasswordHash(application.readPassword, application.hashPassword, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya admin reset-password: %v\n", err)
+		return exitRuntime
+	}
+	owner, err := application.openDatabase(context.Background(), loaded.DatabasePath, key)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya admin reset-password: %v\n", err)
+		return exitRuntime
+	}
+	clear(key)
+	repository, ok := owner.(auth.Repository)
+	if !ok {
+		_ = owner.Close()
+		fmt.Fprintln(stderr, "atalaya admin reset-password: database does not support authentication")
+		return exitRuntime
+	}
+	service, err := auth.NewService(repository)
+	if err == nil {
+		err = service.ResetPassword(context.Background(), passwordHash)
+	}
+	closeErr := owner.Close()
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya admin reset-password: %v\n", err)
+		return exitRuntime
+	}
+	if closeErr != nil {
+		fmt.Fprintf(stderr, "atalaya admin reset-password: close database: %v\n", closeErr)
+		return exitRuntime
+	}
+	fmt.Fprintln(stdout, "administrator password reset; all sessions revoked")
+	return exitSuccess
 }
 
 func (application Application) runAdminCreateCommand(args []string, stdout, stderr io.Writer) int {

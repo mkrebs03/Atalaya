@@ -33,7 +33,14 @@ func mustLoadMigrations() []migration {
 	if err != nil {
 		panic(err)
 	}
-	return []migration{newMigrationWithValidator(1, string(initial), validateSchemaV1)}
+	sessions, err := migrationFiles.ReadFile("migrations/002_sessions.sql")
+	if err != nil {
+		panic(err)
+	}
+	return []migration{
+		newMigrationWithValidator(1, string(initial), validateSchemaV1),
+		newMigrationWithValidator(2, string(sessions), validateSchemaV2),
+	}
 }
 
 func newMigrationWithValidator(version int, statement string, validate schemaValidator) migration {

@@ -14,7 +14,8 @@ export default defineConfig({
   },
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // All projects exercise the same single-administrator database and restore its password.
+  workers: 1,
   reporter: process.env.CI ? 'line' : 'html',
   use: {
     baseURL,
@@ -25,6 +26,10 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'mobile-chromium',
+      use: { ...devices['Pixel 7'] },
     },
   ],
   webServer: {

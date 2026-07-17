@@ -46,7 +46,8 @@ test-e2e: $(WEB_DEPS_STAMP)
 	dd if=/dev/urandom of=build/e2e/master.key bs=32 count=1 conv=notrunc status=none
 	install -m 0600 /dev/null build/e2e/server.yaml
 	printf '%s\n' 'listen: 127.0.0.1:4173' 'mode: development' 'public_url: http://127.0.0.1:4173' 'database_path: atalaya.db' 'master_key_path: master.key' > build/e2e/server.yaml
-	cd web && $(NPM) run test:e2e
+	ATALAYA_E2E_PASSWORD='correct horse battery staple 2026!' $(GO) run ./internal/testsupport/e2eseed --config build/e2e/server.yaml
+	cd web && ATALAYA_E2E_PASSWORD='correct horse battery staple 2026!' $(NPM) run test:e2e
 
 verify-cross-deps:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) test -exec=true -run '^$$' ./internal/server

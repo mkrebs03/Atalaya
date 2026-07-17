@@ -41,7 +41,12 @@ func writeAdminUsage(output io.Writer) {
 
 Commands:
   create  Create the single local administrator
+  reset-password  Reset password and revoke all sessions
 `)
+}
+
+func writeAdminResetPasswordUsage(output io.Writer) {
+	fmt.Fprintf(output, "Usage: atalaya admin reset-password [--config <path>]\n\nOptions:\n  --config <path>  Server YAML configuration (default %s)\n", defaultServerConfigPath)
 }
 
 func writeAdminCreateUsage(output io.Writer) {

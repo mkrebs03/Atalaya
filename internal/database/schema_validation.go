@@ -49,6 +49,45 @@ func validateSchemaV1(ctx context.Context, query queryer) error {
 	return nil
 }
 
+func validateSchemaV2(ctx context.Context, query queryer) error {
+	if err := validateSchemaV1(ctx, query); err != nil {
+		return err
+	}
+	if err := validateTable(ctx, query, "sessions", []expectedColumn{
+		{name: "id", typeName: "TEXT", notNull: true, primaryKey: 1},
+		{name: "administrator_id", typeName: "TEXT", notNull: true},
+		{name: "token_hash", typeName: "BLOB", notNull: true},
+		{name: "created_at", typeName: "TEXT", notNull: true},
+		{name: "last_activity_at", typeName: "TEXT", notNull: true},
+		{name: "idle_expires_at", typeName: "TEXT", notNull: true},
+		{name: "absolute_expires_at", typeName: "TEXT", notNull: true},
+		{name: "revoked_at", typeName: "TEXT"},
+		{name: "remote_addr", typeName: "TEXT", notNull: true},
+		{name: "user_agent", typeName: "TEXT", notNull: true},
+		{name: "tailscale_login", typeName: "TEXT"},
+		{name: "tailscale_name", typeName: "TEXT"},
+		{name: "proxy_identity_informational", typeName: "INTEGER", notNull: true},
+	}); err != nil {
+		return corruptQueryError(ctx, "invalid sessions table", err)
+	}
+	var tableSQL, indexSQL string
+	if err := query.QueryRowContext(ctx, "SELECT sql FROM sqlite_schema WHERE type='table' AND name='sessions'").Scan(&tableSQL); err != nil {
+		return corruptQueryError(ctx, "missing sessions table", err)
+	}
+	const exactTable = "CREATE TABLE sessions ( id TEXT PRIMARY KEY NOT NULL, administrator_id TEXT NOT NULL REFERENCES administrators(id), token_hash BLOB NOT NULL UNIQUE CHECK(length(token_hash) = 32), created_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, idle_expires_at TEXT NOT NULL, absolute_expires_at TEXT NOT NULL, revoked_at TEXT, remote_addr TEXT NOT NULL, user_agent TEXT NOT NULL CHECK(length(CAST(user_agent AS BLOB)) <= 512), tailscale_login TEXT, tailscale_name TEXT, proxy_identity_informational INTEGER NOT NULL CHECK(proxy_identity_informational IN (0, 1)) )"
+	if strings.Join(strings.Fields(tableSQL), " ") != exactTable {
+		return corruptError("sessions table definition differs", nil)
+	}
+	if err := query.QueryRowContext(ctx, "SELECT sql FROM sqlite_schema WHERE type='index' AND name='sessions_administrator_active'").Scan(&indexSQL); err != nil {
+		return corruptQueryError(ctx, "missing active sessions index", err)
+	}
+	const exact = "CREATE INDEX sessions_administrator_active ON sessions (administrator_id, revoked_at, absolute_expires_at)"
+	if strings.Join(strings.Fields(indexSQL), " ") != exact {
+		return corruptError("active sessions index differs", nil)
+	}
+	return nil
+}
+
 func validateUniqueUsernameIndex(ctx context.Context, query queryer) error {
 	rows, err := query.QueryContext(ctx, `
 		SELECT name

@@ -17,10 +17,13 @@ import (
 
 // Mode controls security-sensitive startup behavior.
 type Mode string
+type TrustedProxy string
 
 const (
-	ModeProduction  Mode = "production"
-	ModeDevelopment Mode = "development"
+	ModeProduction             Mode         = "production"
+	ModeDevelopment            Mode         = "development"
+	TrustedProxyNone           TrustedProxy = "none"
+	TrustedProxyTailscaleServe TrustedProxy = "tailscale_serve"
 )
 
 // ErrInvalidServerConfig identifies YAML or values that violate the Phase 1A
@@ -29,11 +32,12 @@ var ErrInvalidServerConfig = errors.New("invalid server configuration")
 
 // ServerConfig is the complete Phase 1A server startup configuration.
 type ServerConfig struct {
-	Listen        string `yaml:"listen"`
-	Mode          Mode   `yaml:"mode"`
-	PublicURL     string `yaml:"public_url"`
-	DatabasePath  string `yaml:"database_path"`
-	MasterKeyPath string `yaml:"master_key_path"`
+	Listen        string       `yaml:"listen"`
+	Mode          Mode         `yaml:"mode"`
+	PublicURL     string       `yaml:"public_url"`
+	DatabasePath  string       `yaml:"database_path"`
+	MasterKeyPath string       `yaml:"master_key_path"`
+	TrustedProxy  TrustedProxy `yaml:"trusted_proxy"`
 }
 
 // LoadServer reads a strict, single-document Phase 1A server configuration.
@@ -54,6 +58,9 @@ func LoadServer(path string) (ServerConfig, error) {
 	var loaded ServerConfig
 	if err := decoder.Decode(&loaded); err != nil {
 		return ServerConfig{}, invalidServerConfigError("decode server configuration", err)
+	}
+	if loaded.TrustedProxy == "" {
+		loaded.TrustedProxy = TrustedProxyNone
 	}
 
 	var additional any
@@ -92,6 +99,15 @@ func (serverConfig ServerConfig) Validate() error {
 		return fmt.Errorf("master key path is required")
 	}
 
+	if serverConfig.TrustedProxy == "" {
+		serverConfig.TrustedProxy = TrustedProxyNone
+	}
+	if serverConfig.TrustedProxy != TrustedProxyNone && serverConfig.TrustedProxy != TrustedProxyTailscaleServe {
+		return fmt.Errorf("unsupported trusted proxy %q", serverConfig.TrustedProxy)
+	}
+	if serverConfig.TrustedProxy == TrustedProxyTailscaleServe && serverConfig.Mode != ModeProduction {
+		return fmt.Errorf("tailscale_serve trusted proxy requires production mode")
+	}
 	return ValidateServerSettings(serverConfig.Listen, serverConfig.Mode, serverConfig.PublicURL)
 }
 

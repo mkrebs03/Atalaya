@@ -97,7 +97,7 @@ func TestPreflightClassifiesForeignCorruptAndFuture(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "future.db")
 		database := openTestDatabase(t, path)
 		if _, err := database.sql.Exec(
-			"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (2, ?, ?)",
+			"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (3, ?, ?)",
 			"future", testInstant.Format("2006-01-02T15:04:05Z07:00"),
 		); err != nil {
 			t.Fatal(err)
@@ -114,7 +114,7 @@ func TestPreflightClassifiesForeignCorruptAndFuture(t *testing.T) {
 				checksum TEXT NOT NULL,
 				applied_at TEXT NOT NULL
 			);
-			INSERT INTO schema_migrations VALUES (2, 'future', '2026-07-16T12:09:10Z')`); err != nil {
+			INSERT INTO schema_migrations VALUES (3, 'future', '2026-07-16T12:09:10Z')`); err != nil {
 			t.Fatal(err)
 		}
 		raw.Close()
@@ -198,7 +198,7 @@ func TestValidationUsesSingleReadSnapshotAcrossConcurrentWALWrite(t *testing.T) 
 	if err != nil {
 		t.Fatalf("validateAtalaya(snapshot) error = %v", err)
 	}
-	if validation.version != 1 {
+	if validation.version != 2 {
 		t.Fatalf("validateAtalaya(snapshot) version = %d", validation.version)
 	}
 }
@@ -336,7 +336,7 @@ func TestPreflightReadsCurrentDatabaseWithoutWALSidecars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight() error = %v", err)
 	}
-	if result.State != StateAtalaya || result.SchemaVersion != 1 {
+	if result.State != StateAtalaya || result.SchemaVersion != 2 {
 		t.Fatalf("Preflight() = %+v", result)
 	}
 }

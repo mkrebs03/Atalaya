@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { provide, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { auth, authKey } from '@/auth/useAuth'
 
 const route = useRoute()
+provide(authKey, auth)
 
 watch(
   () => route.path,

@@ -31,9 +31,12 @@ Base de datos impide mas de un administrador activo.
 
 ### Session
 
-- Hash del token, nunca token en claro.
-- Administrador, creacion, expiracion absoluta, ultima actividad y revocacion.
-- `remote_addr` observado por el servidor y user-agent truncado. Bajo Tailscale Serve,
+- UUID, FK al administrador y hash SHA-256 unico del token como BLOB de 32 bytes;
+  nunca token en claro.
+- `created_at`, `last_activity_at`, `idle_expires_at`, `absolute_expires_at` y
+  `revoked_at` nullable, todos RFC3339 UTC. Idle dura 24 horas y absoluta 7 dias;
+  alcanzar cualquiera invalida sin reactivacion.
+- `remote_addr` observado por el servidor y user-agent UTF-8 truncado a 512 bytes. Bajo Tailscale Serve,
   `remote_addr` normalmente es loopback y no se presenta como IP del usuario.
 - Identidad reenviada por el proxy local, nullable y marcada `informational`; nunca se
   usa para autenticar, autorizar o atribuir una IP tailnet.

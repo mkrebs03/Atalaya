@@ -21,6 +21,7 @@ type Config struct {
 	Listen          string
 	Mode            Mode
 	PublicURL       string
+	TrustedProxy    startupconfig.TrustedProxy
 	ShutdownTimeout time.Duration
 }
 
@@ -32,6 +33,16 @@ func (config Config) Validate() error {
 
 	if config.ShutdownTimeout <= 0 {
 		return fmt.Errorf("shutdown timeout must be positive")
+	}
+	trustedProxy := config.TrustedProxy
+	if trustedProxy == "" {
+		trustedProxy = startupconfig.TrustedProxyNone
+	}
+	if trustedProxy != startupconfig.TrustedProxyNone && trustedProxy != startupconfig.TrustedProxyTailscaleServe {
+		return fmt.Errorf("unsupported trusted proxy %q", trustedProxy)
+	}
+	if trustedProxy == startupconfig.TrustedProxyTailscaleServe && config.Mode != ModeProduction {
+		return fmt.Errorf("tailscale_serve trusted proxy requires production mode")
 	}
 
 	return nil

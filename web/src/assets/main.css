@@ -52,6 +52,21 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+.primary-button {
+  min-height: 3rem;
+  border: 2px solid var(--ink);
+  background: var(--ink);
+  color: white;
+  padding: 0.7rem 1rem;
+  font: 700 1rem var(--font-body);
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 :where(a, button, [tabindex]):focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 4px;

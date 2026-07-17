@@ -88,6 +88,21 @@ Login no exige token CSRF porque todavia no existe sesion. Debe validar `Origin`
 origen publico configurado y rechazar `Sec-Fetch-Site: cross-site`; navegadores que no
 envien Fetch Metadata siguen sujetos a Origin, cookie SameSite y rate limit global.
 
+Request exacto, JSON estricto y maximo 4 KiB:
+
+```json
+{"username":"admin","password":"secret"}
+```
+
+Login, `GET /api/v1/auth/me` y cambio exitoso responden:
+
+```json
+{
+  "administrator":{"id":"opaque-id","username":"admin"},
+  "session":{"idle_expires_at":"RFC3339","absolute_expires_at":"RFC3339"}
+}
+```
+
 ### `POST /api/v1/agent-enrollments`
 
 Usado por agente, no navegador. Request incluye:
@@ -128,6 +143,12 @@ coinciden token, `request_id` y hash del payload completo.
 
 Logout y cambio de password requieren CSRF. Cambio de password revoca todas las
 sesiones existentes y puede emitir una sesion nueva para el request actual.
+`GET csrf` responde `{"csrf_token":"base64url"}`. Logout exitoso responde `204`.
+Cambio acepta `{"current_password":"old","new_password":"new"}` y siempre emite
+sesion reemplazo al completar. Codigos auth: `invalid_credentials` 401,
+`authentication_required`/`session_expired` 401, `current_password_invalid` y
+`csrf_failed` 403, `validation_failed` 400/422 y `rate_limited` 429 con
+`Retry-After`. Todo error incluye `request_id`.
 
 Todo recurso mutable devuelve `version` entero y header `ETag: "<version>"`. `PATCH`,
 `DELETE`, enable/disable y otras mutaciones sobre recurso existente requieren

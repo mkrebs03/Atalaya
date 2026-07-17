@@ -71,11 +71,21 @@ abrir listener publico como fallback.
 - Estado mutante requiere token CSRF ligado a sesion.
 - UI no inserta HTML no confiable; CSP restringe scripts a assets propios.
 
+Token de sesion usa 32 bytes CSPRNG en base64url sin padding; SQLite guarda solo
+SHA-256 binario. CSRF no se persiste: es base64url de HMAC-SHA256 con token raw como
+clave y bytes `atalaya\x00csrf\x00v1` como mensaje. El quinto fallo de login por
+username normalizado inicia backoff 1/2/4/8 segundos hasta 60; limiter global permite
+30/minuto con burst 10, conserva maximo 1024 entradas y purga tras 15 minutos.
+
 Servidor no usa `X-Forwarded-For` ni headers de identidad Tailscale para decisiones de
 auth, autorizacion o rate limit. Conexion proxied se registra como tal sin atribuir IP
 del usuario. Login valida `Origin`; identidad Tailscale reenviada puede registrarse como
 dato informativo solo si conexion inmediata es loopback y modo Serve esta habilitado,
 nunca autentica ni autoriza.
+
+Configuracion `trusted_proxy` acepta `none` (default) o `tailscale_serve`. El segundo
+valor exige production, origen HTTPS y listener loopback. Headers de identidad se
+decodifican RFC 2047 y valores invalidos se descartan.
 
 Auditoria persiste el `remote_addr` realmente observado y, por separado, identidad
 proxy informativa nullable con su marca de confianza. No etiqueta loopback ni headers

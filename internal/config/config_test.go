@@ -36,6 +36,31 @@ master_key_path: master.key
 	}
 }
 
+func TestTrustedProxyDefaultsAndValidation(t *testing.T) {
+	base := ServerConfig{Listen: "127.0.0.1:8080", Mode: ModeProduction, PublicURL: "https://atalaya.example", DatabasePath: "db", MasterKeyPath: "key"}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("default none: %v", err)
+	}
+	base.TrustedProxy = TrustedProxyTailscaleServe
+	if err := base.Validate(); err != nil {
+		t.Fatalf("tailscale serve: %v", err)
+	}
+	base.Listen = "0.0.0.0:8080"
+	if err := base.Validate(); err == nil {
+		t.Fatal("non-loopback tailscale_serve listener accepted")
+	}
+	base.Listen = "127.0.0.1:8080"
+	base.Mode = ModeDevelopment
+	if err := base.Validate(); err == nil {
+		t.Fatal("development tailscale_serve accepted")
+	}
+	base.Mode = ModeProduction
+	base.TrustedProxy = "unknown"
+	if err := base.Validate(); err == nil {
+		t.Fatal("unknown trusted proxy accepted")
+	}
+}
+
 func TestLoadServerPreservesAbsolutePaths(t *testing.T) {
 	t.Parallel()
 

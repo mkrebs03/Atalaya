@@ -1,28 +1,45 @@
 import { createRouter, createWebHistory, type RouterHistory, type RouteRecordRaw } from 'vue-router'
-import BootstrapView from '@/views/BootstrapView.vue'
+import { auth } from '@/auth/useAuth'
+import AuthenticatedLayout from '@/layouts/AuthenticatedLayout.vue'
+import AccountView from '@/views/AccountView.vue'
+import HomeView from '@/views/HomeView.vue'
+import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
 
 const routes: RouteRecordRaw[] = [
+  { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
   {
     path: '/',
-    name: 'bootstrap',
-    component: BootstrapView,
-  },
-  {
-    path: '/:pathMatch(.*)*',
-    name: 'not-found',
-    component: NotFoundView,
+    component: AuthenticatedLayout,
+    meta: { requiresAuth: true },
+    children: [
+      { path: '', name: 'home', component: HomeView },
+      { path: 'account', name: 'account', component: AccountView },
+      { path: ':pathMatch(.*)*', name: 'not-found', component: NotFoundView },
+    ],
   },
 ]
+
+function safeRedirect(value: unknown): string {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : '/'
+}
 
 export function createAppRouter(
   history: RouterHistory = createWebHistory(import.meta.env.BASE_URL),
 ) {
-  return createRouter({
-    history,
-    routes,
-    scrollBehavior: () => ({ top: 0 }),
+  const router = createRouter({ history, routes, scrollBehavior: () => ({ top: 0 }) })
+  auth.setLoginRedirect(() => {
+    if (router.currentRoute.value.name !== 'login')
+      void router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
   })
+  router.beforeEach(async (to) => {
+    const authenticated = await auth.restore()
+    if (to.meta.requiresAuth && !authenticated)
+      return { name: 'login', query: { redirect: to.fullPath } }
+    if (to.name === 'login' && authenticated) return safeRedirect(to.query.redirect)
+    return true
+  })
+  return router
 }
 
 export default createAppRouter()
