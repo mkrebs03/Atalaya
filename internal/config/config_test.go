@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,7 +96,22 @@ master_key_path: master.key
 			if err == nil || !strings.Contains(err.Error(), test.match) {
 				t.Fatalf("LoadServer() error = %v, want containing %q", err, test.match)
 			}
+			if !errors.Is(err, ErrInvalidServerConfig) {
+				t.Fatalf("LoadServer() error = %v, want ErrInvalidServerConfig", err)
+			}
 		})
+	}
+}
+
+func TestLoadServerKeepsFilesystemFailureOperational(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadServer(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err == nil {
+		t.Fatal("LoadServer() error = nil")
+	}
+	if errors.Is(err, ErrInvalidServerConfig) {
+		t.Fatalf("LoadServer() mislabeled filesystem failure: %v", err)
 	}
 }
 

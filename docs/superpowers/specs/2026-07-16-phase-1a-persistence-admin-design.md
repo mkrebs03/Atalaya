@@ -221,11 +221,12 @@ ASCII o de control. El resultado debe cumplir
 el mismo normalizador.
 
 El password nunca se acepta por argv, entorno o stdin redirigido: el comando requiere
-TTY, la solicita dos veces sin eco mediante `golang.org/x/term` y compara los bytes
-exactos. Debe ser UTF-8 valido y tener entre 12 y 256 bytes. No se hace trim ni se
-imponen reglas de composicion. Un mismatch o cualquier validacion fallida ocurre antes
-de abrir una conexion writable; los buffers se limpian en cuanto sea razonablemente
-posible.
+una TTY detectada mediante `golang.org/x/term`, la solicita dos veces sin eco y compara
+los bytes exactos. En Linux, `golang.org/x/sys/unix` controla el modo del terminal y
+restaura exactamente su estado anterior tambien ante una interrupcion manejable. Debe
+ser UTF-8 valido y tener entre 12 y 256 bytes. No se hace trim ni se imponen reglas de
+composicion. Un mismatch o cualquier validacion fallida ocurre antes de abrir una
+conexion writable; los buffers se limpian en cuanto sea razonablemente posible.
 
 La transaccion de insert del administrador, separada de las migraciones, persiste:
 
@@ -273,8 +274,8 @@ La cobertura minima incluye:
   sin crear DB nueva, fallo post-migracion y dos inserts concurrentes con usernames
   distintos rechazados por el singleton;
 - golden/compatibilidad del encoding persistente AES-GCM y sentinel exacto;
-- ayuda y codigos de salida de los tres comandos, y ausencia de listener ante cualquier
-  fallo de bootstrap; y
+- ayuda y codigos de salida de los tres comandos, restauracion del TTY tras interrumpir
+  el prompt, y ausencia de listener ante cualquier fallo de bootstrap; y
 - smoke E2E de `/healthz`, assets, fallback SPA y 404 de API.
 
 La verificacion final ejecuta `make lint`, `make test`, `make build` y

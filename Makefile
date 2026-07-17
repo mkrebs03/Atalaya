@@ -1,6 +1,7 @@
 GO ?= go
 NPM ?= npm
 VERSION ?= dev
+CONFIG ?= /etc/atalaya/server.yaml
 
 GO_PACKAGES := ./cmd/... ./internal/... ./web
 WEB_DEPS_STAMP := web/node_modules/.atalaya-dependencies
@@ -39,6 +40,12 @@ test-e2e: $(WEB_DEPS_STAMP)
 	cd web && $(NPM) run build
 	mkdir -p build
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o build/atalaya ./cmd/atalaya
+	rm -f build/e2e/atalaya.db build/e2e/atalaya.db-shm build/e2e/atalaya.db-wal build/e2e/master.key build/e2e/server.yaml
+	mkdir -p build/e2e
+	install -m 0600 /dev/null build/e2e/master.key
+	dd if=/dev/urandom of=build/e2e/master.key bs=32 count=1 conv=notrunc status=none
+	install -m 0600 /dev/null build/e2e/server.yaml
+	printf '%s\n' 'listen: 127.0.0.1:4173' 'mode: development' 'public_url: http://127.0.0.1:4173' 'database_path: atalaya.db' 'master_key_path: master.key' > build/e2e/server.yaml
 	cd web && $(NPM) run test:e2e
 
 verify-cross-deps:
@@ -50,7 +57,7 @@ install-e2e-browser: $(WEB_DEPS_STAMP)
 
 dev-server: $(WEB_DEPS_STAMP)
 	cd web && $(NPM) run build
-	$(GO) run ./cmd/atalaya server --mode development --listen 127.0.0.1:8080 --public-url http://127.0.0.1:5173
+	$(GO) run ./cmd/atalaya server --config "$(CONFIG)"
 
 web-dev: $(WEB_DEPS_STAMP)
 	cd web && $(NPM) run dev

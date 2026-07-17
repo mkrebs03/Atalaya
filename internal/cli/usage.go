@@ -10,6 +10,8 @@ func writeRootUsage(output io.Writer) {
 
 Commands:
   server   Start the Atalaya HTTP server
+  migrate  Apply database migrations without starting HTTP
+  admin    Manage the local administrator
   agent    Reserved for the monitoring agent
   backup   Reserved for data backup
   verify   Reserved for installation verification
@@ -19,17 +21,40 @@ Commands:
 }
 
 func writeServerUsage(output io.Writer) {
-	fmt.Fprint(output, `Usage: atalaya server --public-url <origin> [options]
+	fmt.Fprintf(output, `Usage: atalaya server [--config <path>]
 
 Options:
-  --listen <address>     TCP loopback address (default 127.0.0.1:8080)
-  --mode <mode>          production or development (default production)
-  --public-url <origin>  Browser-facing origin; required
+  --config <path>  Server YAML configuration (default %s)
+`, defaultServerConfigPath)
+}
+
+func writeMigrateUsage(output io.Writer) {
+	fmt.Fprintf(output, `Usage: atalaya migrate [--config <path>]
+
+Options:
+  --config <path>  Server YAML configuration (default %s)
+`, defaultServerConfigPath)
+}
+
+func writeAdminUsage(output io.Writer) {
+	fmt.Fprint(output, `Usage: atalaya admin <command> [options]
+
+Commands:
+  create  Create the single local administrator
 `)
 }
 
+func writeAdminCreateUsage(output io.Writer) {
+	fmt.Fprintf(output, `Usage: atalaya admin create [--config <path>] [--username <name>]
+
+Options:
+  --config <path>    Server YAML configuration (default %s)
+  --username <name>  Administrator username (default admin)
+`, defaultServerConfigPath)
+}
+
 func writeReservedUsage(output io.Writer, command string) {
-	fmt.Fprintf(output, "Usage: atalaya %s\n\nReserved in Phase 0; execution is not implemented yet.\n", command)
+	fmt.Fprintf(output, "Usage: atalaya %s\n\nReserved for a later phase; execution is not implemented yet.\n", command)
 }
 
 func writeVersionUsage(output io.Writer) {

@@ -16,7 +16,7 @@ const (
 	ModeDevelopment = startupconfig.ModeDevelopment
 )
 
-// Config contains the Phase 0 server startup configuration.
+// Config contains the validated HTTP process settings derived from Phase 1A YAML.
 type Config struct {
 	Listen          string
 	Mode            Mode

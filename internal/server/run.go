@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -10,7 +11,25 @@ import (
 
 // Run serves HTTP until the context is cancelled or the listener fails.
 func Run(ctx context.Context, config Config, handler http.Handler) error {
-	listener, err := net.Listen("tcp", config.Listen)
+	return run(ctx, config, handler, net.Listen)
+}
+
+func run(
+	ctx context.Context,
+	config Config,
+	handler http.Handler,
+	listen func(string, string) (net.Listener, error),
+) error {
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("invalid server configuration: %w", err)
+	}
+	if handler == nil {
+		return fmt.Errorf("HTTP handler is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	listener, err := listen("tcp", config.Listen)
 	if err != nil {
 		return err
 	}

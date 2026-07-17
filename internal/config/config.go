@@ -23,6 +23,10 @@ const (
 	ModeDevelopment Mode = "development"
 )
 
+// ErrInvalidServerConfig identifies YAML or values that violate the Phase 1A
+// startup configuration contract. Filesystem failures remain operational errors.
+var ErrInvalidServerConfig = errors.New("invalid server configuration")
+
 // ServerConfig is the complete Phase 1A server startup configuration.
 type ServerConfig struct {
 	Listen        string `yaml:"listen"`
@@ -49,25 +53,34 @@ func LoadServer(path string) (ServerConfig, error) {
 
 	var loaded ServerConfig
 	if err := decoder.Decode(&loaded); err != nil {
-		return ServerConfig{}, fmt.Errorf("decode server configuration: %w", err)
+		return ServerConfig{}, invalidServerConfigError("decode server configuration", err)
 	}
 
 	var additional any
 	if err := decoder.Decode(&additional); !errors.Is(err, io.EOF) {
 		if err != nil {
-			return ServerConfig{}, fmt.Errorf("decode server configuration: %w", err)
+			return ServerConfig{}, invalidServerConfigError("decode server configuration", err)
 		}
-		return ServerConfig{}, fmt.Errorf("server configuration must contain exactly one YAML document")
+		return ServerConfig{}, invalidServerConfigError(
+			"server configuration must contain exactly one YAML document", nil,
+		)
 	}
 
 	if err := loaded.Validate(); err != nil {
-		return ServerConfig{}, err
+		return ServerConfig{}, invalidServerConfigError("validate server configuration", err)
 	}
 
 	baseDirectory := filepath.Dir(absolutePath)
 	loaded.DatabasePath = resolvePath(baseDirectory, loaded.DatabasePath)
 	loaded.MasterKeyPath = resolvePath(baseDirectory, loaded.MasterKeyPath)
 	return loaded, nil
+}
+
+func invalidServerConfigError(message string, cause error) error {
+	if cause == nil {
+		return fmt.Errorf("%w: %s", ErrInvalidServerConfig, message)
+	}
+	return fmt.Errorf("%w: %s: %v", ErrInvalidServerConfig, message, cause)
 }
 
 // Validate rejects incomplete or insecure server startup configuration.

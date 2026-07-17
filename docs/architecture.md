@@ -24,13 +24,15 @@ Dependencias Go fundacionales aprobadas para v1:
 - `modernc.org/sqlite`, driver SQLite pure Go para conservar builds
   `CGO_ENABLED=0` y cross-compilation sin toolchain C.
 - `golang.org/x/crypto/argon2` para passwords Argon2id.
+- `golang.org/x/sys/unix` para controles Linux de archivos y terminales sensibles.
+- `golang.org/x/term` para detectar la terminal local usada al ingresar passwords.
 - `go.yaml.in/yaml/v3` para los archivos de configuracion YAML.
 
-Fase 0 fija respectivamente `v1.53.0`, `v0.54.0` y `v3.0.4`. Una prueba de
-compatibilidad ejecuta SQLite en memoria, Argon2id y decodificacion YAML estricta con
-`CGO_ENABLED=0`; el build tambien la compila, sin ejecutarla, para Linux `amd64` y
-`arm64`. Esto mantiene los pins verificables sin crear modulos productivos vacios ni
-artefactos de prueba adicionales.
+Fase 0 fijo SQLite, Argon2id y YAML; Fase 1A incorporo `x/sys` y `x/term` y puso esas
+dependencias al servicio de persistencia, configuracion, clave maestra y creacion del
+administrador. Una prueba de compatibilidad continua ejercitando SQLite en memoria,
+Argon2id y decodificacion YAML estricta con `CGO_ENABLED=0`; el build tambien la
+compila, sin ejecutarla, para Linux `amd64` y `arm64`.
 
 El resto usa biblioteca estandar salvo que una dependencia nueva reduzca riesgo o
 complejidad de forma demostrable. Toda dependencia directa queda fijada en `go.mod` y

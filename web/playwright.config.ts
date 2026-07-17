@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test'
 const baseURL = process.env.ATALAYA_E2E_BASE_URL ?? 'http://127.0.0.1:4173'
 const serverCommand =
   process.env.ATALAYA_E2E_SERVER_COMMAND ??
-  '../build/atalaya server --mode development --listen 127.0.0.1:4173 --public-url http://127.0.0.1:4173'
+  '../build/atalaya server --config ../build/e2e/server.yaml'
 
 export default defineConfig({
   testDir: './e2e',
