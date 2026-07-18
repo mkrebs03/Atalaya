@@ -15,9 +15,9 @@ import (
 func TestFailedMigrationRollsBackOnlyItsTransaction(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "database.db")
 	migrations := append([]migration(nil), embeddedMigrations...)
-	migrations = append(migrations, newMigrationWithValidator(3, `
+	migrations = append(migrations, newMigrationWithValidator(4, `
 		CREATE TABLE must_roll_back (id INTEGER);
-		INSERT INTO table_that_does_not_exist(id) VALUES (1);`, validateSchemaV2))
+		INSERT INTO table_that_does_not_exist(id) VALUES (1);`, validateSchemaV3))
 
 	_, err := open(context.Background(), path, testMasterKey(), openOptions{
 		clock:      func() time.Time { return testInstant },
@@ -38,8 +38,8 @@ func TestFailedMigrationRollsBackOnlyItsTransaction(t *testing.T) {
 	).Scan(&rolledBackTable); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 2 || rolledBackTable != 0 {
-		t.Fatalf("after failed v3: migrations = %d, rolled-back table count = %d", migrationCount, rolledBackTable)
+	if migrationCount != 3 || rolledBackTable != 0 {
+		t.Fatalf("after failed v4: migrations = %d, rolled-back table count = %d", migrationCount, rolledBackTable)
 	}
 }
 
@@ -277,11 +277,11 @@ func TestValidationRejectsNonContiguousStoredHistory(t *testing.T) {
 	database := openTestDatabase(t, path)
 	extraMigrations := append([]migration(nil), embeddedMigrations...)
 	extraMigrations = append(extraMigrations,
-		newMigrationWithValidator(3, "SELECT 3", validateSchemaV2),
-		newMigrationWithValidator(4, "SELECT 4", validateSchemaV2))
+		newMigrationWithValidator(4, "SELECT 4", validateSchemaV3),
+		newMigrationWithValidator(5, "SELECT 5", validateSchemaV3))
 	if _, err := database.sql.Exec(
-		"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (4, ?, ?)",
-		extraMigrations[3].checksum, testInstant.Format(time.RFC3339Nano),
+		"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (5, ?, ?)",
+		extraMigrations[4].checksum, testInstant.Format(time.RFC3339Nano),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -289,5 +289,19 @@ func TestValidationRejectsNonContiguousStoredHistory(t *testing.T) {
 	_, err := preflight(context.Background(), path, testMasterKey(), extraMigrations)
 	if !errors.Is(err, ErrCorruptDatabase) {
 		t.Fatalf("preflight() error = %v, want ErrCorruptDatabase", err)
+	}
+}
+
+func TestPreflightRejectsMutilatedMigration003Object(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "database.db")
+	database := openTestDatabase(t, path)
+	if _, err := database.sql.Exec("DROP TRIGGER schedule_slots_host_target_insert"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Preflight(context.Background(), path, testMasterKey()); !errors.Is(err, ErrCorruptDatabase) {
+		t.Fatalf("Preflight err=%v", err)
 	}
 }

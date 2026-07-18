@@ -18,6 +18,7 @@ import (
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	atalayacrypto "github.com/mkrebs03/atalaya/internal/crypto"
 	"github.com/mkrebs03/atalaya/internal/database"
+	"github.com/mkrebs03/atalaya/internal/hosts"
 	"github.com/mkrebs03/atalaya/internal/server"
 )
 
@@ -53,10 +54,13 @@ func TestStableCommandExitCodes(t *testing.T) {
 		{name: "admin help", args: []string{"admin", "--help"}, wantCode: exitSuccess, wantOutput: "create"},
 		{name: "admin create help", args: []string{"admin", "create", "--help"}, wantCode: exitSuccess, wantOutput: "--username"},
 		{name: "admin create", args: []string{"admin", "create"}, wantCode: exitSuccess, wantOutput: "administrator \"admin\" created"},
-		{name: "agent reserved", args: []string{"agent"}, wantCode: exitRuntime, wantError: "not implemented"},
+		{name: "agent requires config", args: []string{"agent"}, wantCode: exitUsage, wantError: "--config is required"},
 		{name: "backup reserved", args: []string{"backup"}, wantCode: exitRuntime, wantError: "not implemented"},
 		{name: "verify reserved", args: []string{"verify"}, wantCode: exitRuntime, wantError: "not implemented"},
-		{name: "reserved help", args: []string{"agent", "--help"}, wantCode: exitSuccess, wantOutput: "later phase"},
+		{name: "agent help", args: []string{"agent", "--help"}, wantCode: exitSuccess, wantOutput: "--config"},
+		{name: "bootstrap help", args: []string{"bootstrap", "--help"}, wantCode: exitSuccess, wantOutput: "local-agent"},
+		{name: "bootstrap local help", args: []string{"bootstrap", "local-agent", "--help"}, wantCode: exitSuccess, wantOutput: "--agent-url"},
+		{name: "bootstrap required", args: []string{"bootstrap", "local-agent"}, wantCode: exitUsage, wantError: "are required"},
 		{name: "reserved invalid argument", args: []string{"backup", "--output", "file"}, wantCode: exitUsage, wantError: "unexpected arguments"},
 	}
 
@@ -405,6 +409,33 @@ type fakeDatabase struct {
 	closeErr      error
 	closed        bool
 	resetHash     string
+}
+
+func (*fakeDatabase) PrepareLocalHost(context.Context, string, string, time.Time, io.Reader) (hosts.LocalHost, error) {
+	return hosts.LocalHost{ID: "00000000-0000-4000-8000-000000000001", Credential: bytes.Repeat([]byte{3}, 32)}, nil
+}
+func (*fakeDatabase) CompleteLocalHost(context.Context, string, time.Time, io.Reader) error {
+	return nil
+}
+
+func TestBootstrapLocalAgentUsesDefaultsAndDoesNotPrintSecret(t *testing.T) {
+	dir := t.TempDir()
+	application := testApplication()
+	var stdout, stderr bytes.Buffer
+	code := application.Run([]string{"bootstrap", "local-agent", "--server-config", "server.yaml", "--agent-config", filepath.Join(dir, "agent.yaml"), "--agent-url", "https://oracle.example.ts.net:9474"}, &stdout, &stderr)
+	if code != exitSuccess {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "AwMDAw") || !strings.Contains(stdout.String(), "00000000-") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+	loaded, err := startupconfig.LoadAgent(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Listen != hosts.DefaultListen || loaded.ServerURL != testServerConfig().PublicURL || loaded.CredentialPath != filepath.Join(dir, "agent-credential") {
+		t.Fatalf("config=%+v", loaded)
+	}
 }
 
 func (database *fakeDatabase) FindActiveAdministrator(context.Context, string) (auth.Administrator, error) {

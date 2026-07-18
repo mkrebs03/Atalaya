@@ -57,23 +57,39 @@ El sistema DEBE:
 - Obtener snapshots de cada agente cada 60 segundos por defecto.
 - Mostrar CPU, memoria, filesystems, uptime y estado observado de Tailscale.
 - Descubrir filesystems automaticamente, excluyendo filesystems virtuales y
-  pseudo-filesystems. El administrador puede habilitar o ignorar mounts desde UI.
+  pseudo-filesystems. Filesystems elegibles nacen seleccionados; el administrador
+  puede habilitar o ignorar mounts desde UI.
+
+La lista cerrada de `fs_type` excluidos en v1 es: `autofs`, `binfmt_misc`, `bpf`,
+`cgroup`, `cgroup2`, `configfs`, `debugfs`, `devpts`, `devtmpfs`, `efivarfs`,
+`fusectl`, `hugetlbfs`, `mqueue`, `nsfs`, `overlay`, `proc`, `pstore`, `ramfs`,
+`rootfs`, `rpc_pipefs`, `securityfs`, `selinuxfs`, `squashfs`, `sysfs`, `tmpfs` y
+`tracefs`. Ningun otro tipo se excluye por nombre en v1.
 - Conservar ultimo snapshot y momento de ultima comunicacion exitosa.
+- Antes del primer snapshot valido, mostrar estado `unknown`; nunca inferir healthy de
+  la ausencia de fallos.
 - Al persistir un exito, capturar `freshness_deadline_at` desde el `deadline_at` del
   primer slot siguiente mas 5 segundos de margen operativo. El dato queda stale al
   superar esa frontera; fallos, downtime y reanclajes no la avanzan. `received_at`,
   asignado por el servidor, es el unico timestamp de muestra usado por series y alertas.
-- Marcar un host como no disponible cuando existan tres fallos programados completados
+- Marcar un host como no disponible cuando existan tres fallos operativos programados completados
   y se haya alcanzado el deadline del tercer slot fallido, calculado con el intervalo
   efectivo de cada schedule. Para un host nunca observado, el primer slot comienza en
-  el enrolamiento. El jitter del scheduler esta acotado a 5 segundos y es adicional
-  al margen operativo.
+  el enrolamiento y su estado observado permanece `unknown` tras uno o dos fallos y
+  hasta ese tercer deadline; `degraded` antes del umbral solo aplica a hosts ya
+  observados. El jitter esta acotado a 5 segundos y es adicional al margen operativo.
+- Un payload invalido o incompatible (`FailureProtocol`) cierra su slot y crea el
+  siguiente slot nominal como bookkeeping, pero no cuenta como fallo operativo ni
+  modifica estado observado, version, contadores, timestamps, snapshot o filesystems.
 - Permitir desactivar monitoreo de un host sin eliminar su historico.
 - Permitir archivar y restaurar un host. Archivar detiene el polling y conserva
   historico, incidentes y referencias.
 
 Un agente expone datos; el servidor central inicia la recoleccion. La comunicacion de
 control usada para enrolamiento no convierte el modelo de metricas en push.
+Snapshots parciales conservan campos sanos y declaran warnings seguros. Una desviacion
+absoluta del reloj reportado mayor a cinco minutos se muestra como warning derivado
+por el servidor y degradacion, pero `received_at` sigue siendo la autoridad temporal.
 
 ### 4.2 Servicios
 

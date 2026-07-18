@@ -14,11 +14,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mkrebs03/atalaya/internal/agent"
 	"github.com/mkrebs03/atalaya/internal/auth"
 	"github.com/mkrebs03/atalaya/internal/buildinfo"
+	"github.com/mkrebs03/atalaya/internal/collection"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	atalayacrypto "github.com/mkrebs03/atalaya/internal/crypto"
 	"github.com/mkrebs03/atalaya/internal/database"
+	"github.com/mkrebs03/atalaya/internal/hostquery"
+	"github.com/mkrebs03/atalaya/internal/hosts"
 	"github.com/mkrebs03/atalaya/internal/httpapi"
 	"github.com/mkrebs03/atalaya/internal/server"
 )
@@ -48,6 +52,11 @@ type Application struct {
 	readPassword      passwordReader
 	hashPassword      passwordHasher
 	assets            fs.FS
+	loadAgentConfig   func(string) (startupconfig.AgentConfig, error)
+	loadCredential    func(string) ([]byte, error)
+	runAgent          func(context.Context, string, http.Handler) error
+	newCollector      func() agent.Collector
+	runCollection     func(context.Context, collection.Repository) error
 }
 
 // New creates an application backed by the embedded Vue assets.
@@ -56,8 +65,19 @@ func New(assets fs.FS) (Application, error) {
 		return Application{}, fmt.Errorf("embedded frontend assets are required")
 	}
 	return Application{
-		version: buildinfo.Version,
-		assets:  assets,
+		version:         buildinfo.Version,
+		assets:          assets,
+		loadAgentConfig: startupconfig.LoadAgent,
+		loadCredential:  agent.LoadCredential,
+		runAgent:        agent.Run,
+		newCollector:    func() agent.Collector { return agent.NewLinuxCollector() },
+		runCollection: func(ctx context.Context, repository collection.Repository) error {
+			client, err := collection.NewClient(nil, nil, nil)
+			if err != nil {
+				return err
+			}
+			return (collection.Scheduler{Repository: repository, Puller: client}).Run(ctx)
+		},
 		newHandler: func() (http.Handler, error) {
 			return httpapi.New(assets)
 		},
@@ -93,7 +113,11 @@ func (application Application) Run(args []string, stdout, stderr io.Writer) int 
 		return application.runMigrateCommand(args[1:], stdout, stderr)
 	case "admin":
 		return application.runAdminCommand(args[1:], stdout, stderr)
-	case "agent", "backup", "verify":
+	case "agent":
+		return application.runAgentCommand(args[1:], stdout, stderr)
+	case "bootstrap":
+		return application.runBootstrapCommand(args[1:], stdout, stderr)
+	case "backup", "verify":
 		return runReserved(args[0], args[1:], stdout, stderr)
 	case "-h", "--help":
 		writeRootUsage(stdout)
@@ -126,7 +150,11 @@ func (application Application) runHelp(args []string, stdout, stderr io.Writer) 
 		writeMigrateUsage(stdout)
 	case "admin":
 		writeAdminUsage(stdout)
-	case "agent", "backup", "verify":
+	case "agent":
+		writeAgentUsage(stdout)
+	case "bootstrap":
+		writeBootstrapUsage(stdout)
+	case "backup", "verify":
 		writeReservedUsage(stdout, args[0])
 	case "version":
 		writeVersionUsage(stdout)
@@ -135,6 +163,123 @@ func (application Application) runHelp(args []string, stdout, stderr io.Writer) 
 	default:
 		fmt.Fprintf(stderr, "atalaya help: unknown command %q\n", args[0])
 		return exitUsage
+	}
+	return exitSuccess
+}
+
+func (application Application) runBootstrapCommand(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) && (len(args) == 0 || args[0] != "local-agent") {
+		writeBootstrapUsage(stdout)
+		return exitSuccess
+	}
+	if len(args) == 0 || args[0] != "local-agent" {
+		if len(args) == 0 {
+			writeBootstrapUsage(stderr)
+		} else {
+			fmt.Fprintf(stderr, "atalaya bootstrap: unknown command %q\n", args[0])
+		}
+		return exitUsage
+	}
+	return application.runLocalAgentBootstrap(args[1:], stdout, stderr)
+}
+
+func (application Application) runLocalAgentBootstrap(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) {
+		writeBootstrapLocalAgentUsage(stdout)
+		return exitSuccess
+	}
+	flags := flag.NewFlagSet("bootstrap local-agent", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	serverConfig := flags.String("server-config", "", "server YAML configuration path")
+	agentConfig := flags.String("agent-config", "", "agent YAML configuration path")
+	agentURL := flags.String("agent-url", "", "advertised agent URL")
+	displayName := flags.String("display-name", hosts.DefaultDisplayName, "host display name")
+	listen := flags.String("listen", hosts.DefaultListen, "agent listen address")
+	credentialPath := flags.String("credential-path", "", "credential path")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *serverConfig == "" || *agentConfig == "" || *agentURL == "" {
+		if err != nil {
+			fmt.Fprintf(stderr, "atalaya bootstrap local-agent: %v\n", err)
+		} else {
+			fmt.Fprintln(stderr, "atalaya bootstrap local-agent: --server-config, --agent-config, and --agent-url are required")
+		}
+		return exitUsage
+	}
+	loaded, key, code, ok := application.loadBootstrap("bootstrap local-agent", *serverConfig, stderr)
+	if !ok {
+		return code
+	}
+	defer clear(key)
+	owner, err := application.openDatabase(context.Background(), loaded.DatabasePath, key)
+	clear(key)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya bootstrap local-agent: %v\n", err)
+		return exitRuntime
+	}
+	request := hosts.BootstrapRequest{DisplayName: *displayName, Listen: *listen, ServerURL: loaded.PublicURL, AgentURL: *agentURL, AgentConfig: *agentConfig, CredentialPath: *credentialPath}
+	repository, ok := owner.(hosts.LocalHostRepository)
+	if !ok {
+		_ = owner.Close()
+		fmt.Fprintln(stderr, "atalaya bootstrap local-agent: database does not support local hosts")
+		return exitRuntime
+	}
+	hostID, runErr := (hosts.Bootstrapper{Repository: repository}).Run(context.Background(), request)
+	closeErr := owner.Close()
+	if runErr != nil {
+		fmt.Fprintf(stderr, "atalaya bootstrap local-agent: %v\n", runErr)
+		if errors.Is(runErr, hosts.ErrInvalidBootstrapRequest) {
+			return exitUsage
+		}
+		return exitRuntime
+	}
+	if closeErr != nil {
+		fmt.Fprintf(stderr, "atalaya bootstrap local-agent: close database: %v\n", closeErr)
+		return exitRuntime
+	}
+	fmt.Fprintf(stdout, "local agent bootstrapped: %s\n", hostID)
+	return exitSuccess
+}
+
+func (application Application) runAgentCommand(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) {
+		writeAgentUsage(stdout)
+		return exitSuccess
+	}
+	flags := flag.NewFlagSet("agent", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", "", "agent YAML configuration path")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *configPath == "" {
+		if err != nil {
+			fmt.Fprintf(stderr, "atalaya agent: %v\n", err)
+		} else {
+			fmt.Fprintln(stderr, "atalaya agent: --config is required")
+		}
+		return exitUsage
+	}
+	loaded, err := application.loadAgentConfig(*configPath)
+	if err != nil {
+		if errors.Is(err, startupconfig.ErrInvalidAgentConfig) {
+			fmt.Fprintf(stderr, "atalaya agent: %v\n", err)
+			return exitUsage
+		}
+		fmt.Fprintf(stderr, "atalaya agent: %v\n", err)
+		return exitRuntime
+	}
+	credential, err := application.loadCredential(loaded.CredentialPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya agent: %v\n", err)
+		return exitRuntime
+	}
+	defer clear(credential)
+	handler, err := agent.NewHandler(credential, application.version, application.newCollector())
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya agent: %v\n", err)
+		return exitRuntime
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := application.runAgent(ctx, loaded.Listen, handler); err != nil {
+		fmt.Fprintf(stderr, "atalaya agent: %v\n", err)
+		return exitRuntime
 	}
 	return exitSuccess
 }
@@ -185,7 +330,11 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 			fmt.Fprintf(stderr, "atalaya server: construct authentication service: %v\n", serviceErr)
 			return exitRuntime
 		}
-		handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy})
+		if hostRepository, available := owner.(hostquery.Repository); available {
+			handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy}, hostRepository)
+		} else {
+			handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy})
+		}
 	}
 	if err != nil {
 		_ = owner.Close()
@@ -199,7 +348,12 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 		TrustedProxy:    loaded.TrustedProxy,
 		ShutdownTimeout: 10 * time.Second,
 	}
-	runErr := application.runServer(ctx, processConfig, handler)
+	var runErr error
+	if repository, ok := owner.(collection.Repository); ok && application.runCollection != nil {
+		runErr = runServerAndCollection(ctx, application.runServer, application.runCollection, processConfig, handler, repository)
+	} else {
+		runErr = application.runServer(ctx, processConfig, handler)
+	}
 	closeErr := owner.Close()
 	if runErr != nil {
 		fmt.Fprintf(stderr, "atalaya server: %v\n", runErr)
@@ -210,6 +364,24 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 		return exitRuntime
 	}
 	return exitSuccess
+}
+
+func runServerAndCollection(ctx context.Context, runServer func(context.Context, server.Config, http.Handler) error, runCollection func(context.Context, collection.Repository) error, config server.Config, handler http.Handler, repository collection.Repository) error {
+	coordinated, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errorsChannel := make(chan error, 2)
+	go func() { errorsChannel <- runServer(coordinated, config, handler) }()
+	go func() { errorsChannel <- runCollection(coordinated, repository) }()
+	first := <-errorsChannel
+	cancel()
+	second := <-errorsChannel
+	if first != nil && !errors.Is(first, context.Canceled) {
+		return first
+	}
+	if second != nil && !errors.Is(second, context.Canceled) {
+		return second
+	}
+	return nil
 }
 
 func (application Application) runMigrateCommand(args []string, stdout, stderr io.Writer) int {

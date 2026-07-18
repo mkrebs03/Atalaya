@@ -29,7 +29,7 @@ func TestMigration002UpgradesV1AndValidatesExactSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := Preflight(context.Background(), path, testMasterKey())
-	if err != nil || result.SchemaVersion != 2 {
+	if err != nil || result.SchemaVersion != len(embeddedMigrations) {
 		t.Fatalf("preflight=%+v err=%v", result, err)
 	}
 	raw := openRawDatabase(t, path)
@@ -39,6 +39,28 @@ func TestMigration002UpgradesV1AndValidatesExactSchema(t *testing.T) {
 	raw.Close()
 	if _, err := Preflight(context.Background(), path, testMasterKey()); !errors.Is(err, ErrCorruptDatabase) {
 		t.Fatalf("corrupt schema error=%v", err)
+	}
+}
+
+func TestMigration003UpgradesV2AndValidatesExactSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.db")
+	v2, err := open(context.Background(), path, testMasterKey(), openOptions{clock: func() time.Time { return testInstant }, random: bytes.NewReader(make([]byte, 12)), migrations: embeddedMigrations[:2]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v2.Close(); err != nil {
+		t.Fatal(err)
+	}
+	v3, err := Open(context.Background(), path, testMasterKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v3.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Preflight(context.Background(), path, testMasterKey())
+	if err != nil || result.SchemaVersion != 3 {
+		t.Fatalf("preflight=%+v err=%v", result, err)
 	}
 }
 

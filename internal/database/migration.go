@@ -27,6 +27,15 @@ type migration struct {
 type schemaValidator func(context.Context, queryer) error
 
 var embeddedMigrations = mustLoadMigrations()
+var hostMigrationSQL = mustReadMigration("migrations/003_hosts.sql")
+
+func mustReadMigration(name string) string {
+	contents, err := migrationFiles.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return string(contents)
+}
 
 func mustLoadMigrations() []migration {
 	initial, err := migrationFiles.ReadFile("migrations/001_initial.sql")
@@ -40,6 +49,7 @@ func mustLoadMigrations() []migration {
 	return []migration{
 		newMigrationWithValidator(1, string(initial), validateSchemaV1),
 		newMigrationWithValidator(2, string(sessions), validateSchemaV2),
+		newMigrationWithValidator(3, hostMigrationSQL, validateSchemaV3),
 	}
 }
 

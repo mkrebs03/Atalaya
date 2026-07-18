@@ -1,56 +1,92 @@
+<script setup lang="ts">
+import PageIntro from '@/components/ui/PageIntro.vue'
+import HostSummaryList from '@/components/hosts/HostSummaryList.vue'
+import { useHostPolling } from '@/composables/useHostPolling'
+import { listAllHosts, type HostSummary } from '@/hosts/api'
+
+const polling = useHostPolling<HostSummary[]>(async (signal) => {
+  return listAllHosts(signal)
+})
+</script>
+
 <template>
-  <main id="main-content" class="page" tabindex="-1">
-    <p class="eyebrow">Fase 1</p>
-    <h1>Servidor preparado.</h1>
-    <p class="lede">
-      Persistencia cifrada y autenticación local están operativas. La incorporación de hosts
-      comienza en la fase siguiente.
-    </p>
-    <section class="status-card">
-      <span class="status-dot" aria-hidden="true"></span>
-      <div>
-        <strong>Acceso protegido</strong>
-        <p>Sesión activa y rutas privadas habilitadas.</p>
-      </div>
+  <main id="main-content" class="home route-view" tabindex="-1">
+    <section class="home__hero" aria-labelledby="home-title">
+      <PageIntro
+        index="02"
+        eyebrow="Estado actual"
+        title="La torre recibe señal."
+        copy="Lecturas privadas de CPU, memoria, almacenamiento y conectividad. Una vista operativa sin convertir la ausencia de datos en un falso cero."
+      />
+      <aside class="home__rail" aria-label="Cadencia de actualización">
+        <span>Actualización</span><strong>30 segundos</strong><span>Alcance</span
+        ><strong>Tailnet privada</strong>
+      </aside>
     </section>
+    <HostSummaryList
+      :hosts="polling.data.value ?? []"
+      :loading="polling.loading.value"
+      :error="polling.error.value"
+      :refreshing="polling.refreshing.value"
+      @retry="polling.refresh"
+    />
   </main>
 </template>
+
 <style scoped>
-.page {
-  max-width: 70rem;
+.home {
+  width: min(100%, var(--content-max));
   margin: 0 auto;
-  padding: clamp(2rem, 7vw, 6rem) clamp(1rem, 4vw, 4rem);
+  border-inline: 1px solid var(--line-soft);
 }
-.page h1 {
-  font: 700 clamp(2.8rem, 9vw, 6rem)/0.9 var(--font-display);
-  margin: 0.4rem 0 1.5rem;
+.home__hero {
+  min-height: min(38rem, calc(100svh - 8rem));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.16fr);
+  align-items: center;
+  border-bottom: 1px solid var(--line-strong);
 }
-.eyebrow {
-  font: 700 0.8rem var(--font-mono);
-  color: var(--accent-text);
+.home__hero :deep(.page-intro) {
+  padding: clamp(4rem, 9vw, 8rem) var(--page-gutter);
+}
+.home__rail {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  border-left: 1px solid var(--line-soft);
+  padding: 2rem 1.25rem;
+  font-family: var(--font-mono);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.home__rail span {
+  color: var(--ink-muted);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-.lede {
-  max-width: 45rem;
-  font-size: 1.2rem;
-  line-height: 1.6;
+.home__rail strong {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
-.status-card {
-  margin-top: 3rem;
-  display: flex;
-  gap: 1rem;
-  padding: 1.3rem;
-  border: 2px solid var(--line-strong);
-  background: var(--surface);
+@media (max-width: 60rem) {
+  .home__hero {
+    grid-template-columns: 1fr;
+  }
+  .home__rail {
+    display: none;
+  }
 }
-.status-card p {
-  margin: 0.35rem 0 0;
-}
-.status-dot {
-  width: 0.8rem;
-  height: 0.8rem;
-  margin-top: 0.25rem;
-  border-radius: 50%;
-  background: var(--signal);
+@media (max-width: 42rem) {
+  .home__hero {
+    min-height: calc(100svh - 7.25rem);
+    align-items: end;
+  }
+  .home__hero :deep(.page-intro) {
+    padding-block: 5rem 3.5rem;
+  }
 }
 </style>

@@ -19,6 +19,7 @@ import (
 
 	"github.com/mkrebs03/atalaya/internal/auth"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
+	"github.com/mkrebs03/atalaya/internal/hostquery"
 )
 
 const sessionCookie = "atalaya_session"
@@ -41,9 +42,10 @@ type AuthConfig struct {
 type authAPI struct {
 	service *auth.Service
 	config  AuthConfig
+	hosts   hostquery.Repository
 }
 
-func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig) (http.Handler, error) {
+func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, hostRepositories ...hostquery.Repository) (http.Handler, error) {
 	spa, err := New(assets)
 	if err != nil {
 		return nil, err
@@ -66,7 +68,13 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig) (h
 	if config.RateLimiter == nil {
 		config.RateLimiter = auth.NewLoginRateLimiter(config.Clock)
 	}
+	if len(hostRepositories) > 1 {
+		return nil, fmt.Errorf("at most one host repository is allowed")
+	}
 	api := &authAPI{service: service, config: config}
+	if len(hostRepositories) == 1 {
+		api.hosts = hostRepositories[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/auth/login", api.login)
 	mux.HandleFunc("/api/v1/auth/login", api.methodNotAllowed)
@@ -78,10 +86,26 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig) (h
 	mux.HandleFunc("/api/v1/auth/logout", api.methodNotAllowed)
 	mux.HandleFunc("POST /api/v1/auth/change-password", api.changePassword)
 	mux.HandleFunc("/api/v1/auth/change-password", api.methodNotAllowed)
+	if api.hosts != nil {
+		mux.HandleFunc("GET /api/v1/hosts", api.listHosts)
+		mux.HandleFunc("HEAD /api/v1/hosts", api.hostsMethodNotAllowed)
+		mux.HandleFunc("/api/v1/hosts", api.methodNotAllowed)
+		mux.HandleFunc("GET /api/v1/hosts/{id}", api.getHost)
+		mux.HandleFunc("GET /api/v1/hosts/{id}/filesystems", api.listFilesystems)
+		mux.HandleFunc("HEAD /api/v1/hosts/{id}", api.hostsMethodNotAllowed)
+		mux.HandleFunc("HEAD /api/v1/hosts/{id}/filesystems", api.hostsMethodNotAllowed)
+		mux.HandleFunc("/api/v1/hosts/{id}", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/hosts/{id}/filesystems", api.methodNotAllowed)
+	}
 	mux.HandleFunc("/api", api.notFound)
 	mux.HandleFunc("/api/", api.notFound)
 	mux.Handle("/", api.protectUI(spa))
 	return api.middleware(mux), nil
+}
+
+func (api *authAPI) hostsMethodNotAllowed(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Allow", http.MethodGet)
+	api.methodNotAllowed(response, request)
 }
 
 func validateAuthConfig(config AuthConfig) error {

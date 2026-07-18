@@ -32,7 +32,10 @@ No se promete resistir:
   puede; no elige otro puerto silenciosamente.
 - El backend 9474 permanece en loopback y no se abre en firewall. ACLs/grants de la
   tailnet limitan quien alcanza el endpoint HTTPS publicado por Tailscale Serve.
-- Servidor usa MagicDNS y valida TLS para agentes.
+- Servidor acepta agentes solo en `https://<fqdn>.ts.net:9474`. En cada dial resuelve
+  de nuevo, exige que todas las IP sean `100.64.0.0/10` o
+  `fd7a:115c:a1e0::/48`, conecta una validada conservando SNI, valida con trust store
+  del sistema, ignora proxies de entorno y no sigue redirects.
 - No agregar opcion UI para ignorar TLS.
 - `/healthz` revela solamente salud binaria.
 
@@ -128,6 +131,11 @@ de entidad. Registro guarda version de formato para futura rotacion.
 Passwords y tokens de sesion/enrolamiento se hashean, no se cifran. Credenciales que
 servidor necesita reutilizar, como webhook Discord y bearer de agente, se cifran.
 
+La credencial local de agente en archivo es base64url sin padding: 43 caracteres que
+decodifican 32 bytes, canonicamente seguidos por LF, modo exacto `0600`. Lectura tolera
+solo que falte ese unico LF; rechaza CR, cualquier otro whitespace, padding o contenido
+extra. Comparacion contra el secreto esperado se hace en tiempo constante.
+
 El token de enrolamiento se suministra al agente mediante prompt interactivo o archivo
 `0600` eliminado tras su uso. Nunca se pasa por argv ni queda en variables
 persistentes, para no filtrarse en historial de shell, listado de procesos o logs del
@@ -157,8 +165,8 @@ Oracle metadata (`169.254.169.254`) permanece bloqueada siempre en v1.
 Loopback, link-local, multicast, unspecified y metadata no pueden habilitarse mediante
 CIDR. Validacion al guardar revisa sintaxis; cada ejecucion y redirect vuelve a resolver
 y exige que todas las IPs resultantes cumplan politica. Resultado mixto se rechaza.
-La misma politica se aplica a TCP y a `agent_url`; un agente solo puede anunciar un
-hostname MagicDNS o una direccion Tailscale con HTTPS valido.
+La politica general se aplica a TCP. `agent_url` es mas estricto: solo admite un FQDN
+terminado en `.ts.net`, esquema HTTPS y puerto 9474; nunca una IP literal.
 
 La politica de red de checks no cubre el egress de notificaciones: ese egress se
 restringe por proveedor. Cada adaptador valida la URL con un parser estructurado.
@@ -287,6 +295,8 @@ descarga, inspeccion y ejecucion separadas.
 - Niveles: info para cambios/operacion, warn para fallos recuperables, error para
   trabajo perdido o invariantes.
 - No registrar cada pull exitoso en info indefinidamente; usar debug o resumen.
+- Registrar `FailureProtocol` como diagnostico recuperable de interoperabilidad; no lo
+  contabilizar como indisponibilidad operativa ni mutar el estado observable del host.
 - Registrar cambios administrativos sin valores secretos.
 - Endpoint autenticado de estado muestra jobs atrasados y version, no logs completos.
 - Rotacion/limites pertenecen a `journald` y se documentan en instalacion.

@@ -1,5 +1,6 @@
 import { computed, inject, readonly, shallowRef, type InjectionKey } from 'vue'
 import { APIError, createAuthAPI, type Administrator, type AuthAPI } from './api'
+import { setJSONAuthFailureHandler } from '@/api/client'
 
 export function createAuthContext(client: AuthAPI = createAuthAPI()) {
   const administrator = shallowRef<Administrator | null>(null)
@@ -25,6 +26,12 @@ export function createAuthContext(client: AuthAPI = createAuthAPI()) {
     } else if (error.code !== 'current_password_invalid') {
       alert.value = 'La operación fue rechazada. Intenta nuevamente.'
     }
+  })
+
+  setJSONAuthFailureHandler(() => {
+    if (administrator.value === null) return
+    clear('Tu sesión terminó. Vuelve a ingresar.')
+    redirectToLogin()
   })
 
   async function restore(): Promise<boolean> {

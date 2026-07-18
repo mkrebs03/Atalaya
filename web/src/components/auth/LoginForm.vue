@@ -41,19 +41,34 @@ function submit() {
 .field {
   display: grid;
   gap: 0.45rem;
-  font-weight: 700;
+  color: var(--paper);
+  font: 800 0.68rem var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .field input {
-  min-height: 3rem;
-  border: 2px solid var(--line-strong);
-  background: var(--surface);
-  padding: 0.7rem;
-  font: inherit;
+  min-height: 3.25rem;
+  border: 1px solid color-mix(in srgb, var(--paper) 55%, transparent);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.75rem;
+  font: 1rem var(--font-body);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.login-form :deep(.primary-button) {
+  border-color: var(--accent-surface);
+  background: var(--accent-surface);
+  color: var(--ink);
+}
+.login-form :deep(.primary-button:hover:not(:disabled)) {
+  background: var(--paper);
 }
 .form-error {
   margin: 0;
   padding: 0.75rem;
-  border-left: 0.35rem solid var(--accent-text);
-  color: var(--accent-text);
+  border-left: 0.35rem solid var(--accent-on-dark);
+  color: var(--paper);
+  line-height: 1.5;
 }
 </style>

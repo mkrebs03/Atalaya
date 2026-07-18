@@ -88,6 +88,83 @@ func validateSchemaV2(ctx context.Context, query queryer) error {
 	return nil
 }
 
+func validateSchemaV3(ctx context.Context, query queryer) error {
+	if err := validateSchemaV2(ctx, query); err != nil {
+		return err
+	}
+	for _, table := range []struct {
+		name    string
+		columns []expectedColumn
+	}{
+		{"hosts", []expectedColumn{{"id", "TEXT", true, 1}, {"display_name", "TEXT", true, 0}, {"source", "TEXT", true, 0}, {"agent_url", "TEXT", true, 0}, {"agent_credential", "BLOB", true, 0}, {"administrative_state", "TEXT", true, 0}, {"observed_state", "TEXT", true, 0}, {"interval_seconds", "INTEGER", true, 0}, {"timeout_seconds", "INTEGER", true, 0}, {"last_attempt_at", "TEXT", false, 0}, {"last_success_received_at", "TEXT", false, 0}, {"freshness_deadline_at", "TEXT", false, 0}, {"consecutive_failures", "INTEGER", true, 0}, {"stale", "INTEGER", true, 0}, {"archived_at", "TEXT", false, 0}, {"bootstrap_completed_at", "TEXT", false, 0}, {"created_at", "TEXT", true, 0}, {"updated_at", "TEXT", true, 0}, {"collection_generation", "INTEGER", true, 0}, {"version", "INTEGER", true, 0}}},
+		{"host_snapshots", []expectedColumn{{"host_id", "TEXT", true, 1}, {"received_at", "TEXT", true, 0}, {"observed_at", "TEXT", true, 0}, {"hostname", "TEXT", true, 0}, {"boot_id", "TEXT", false, 0}, {"uptime_seconds", "INTEGER", false, 0}, {"cpu_used_percent", "REAL", false, 0}, {"memory_used_bytes", "INTEGER", false, 0}, {"memory_total_bytes", "INTEGER", false, 0}, {"tailscale_state", "TEXT", true, 0}, {"tailscale_hostname", "TEXT", false, 0}, {"agent_version", "TEXT", true, 0}, {"protocol_version", "INTEGER", true, 0}}},
+		{"host_snapshot_warnings", []expectedColumn{{"host_id", "TEXT", true, 1}, {"code", "TEXT", true, 2}}},
+		{"host_snapshot_addresses", []expectedColumn{{"host_id", "TEXT", true, 1}, {"address", "TEXT", true, 2}}},
+		{"filesystems", []expectedColumn{{"id", "TEXT", true, 1}, {"host_id", "TEXT", true, 0}, {"identity_kind", "TEXT", true, 0}, {"identity_key", "BLOB", true, 0}, {"fs_uuid", "TEXT", false, 0}, {"mount_root", "TEXT", true, 0}, {"mount_point", "TEXT", true, 0}, {"major_minor", "TEXT", true, 0}, {"fs_type", "TEXT", true, 0}, {"device", "TEXT", true, 0}, {"total_bytes", "INTEGER", true, 0}, {"used_bytes", "INTEGER", true, 0}, {"available_bytes", "INTEGER", true, 0}, {"discovered_at", "TEXT", true, 0}, {"selected", "INTEGER", true, 0}, {"present", "INTEGER", true, 0}, {"last_observed_at", "TEXT", true, 0}, {"version", "INTEGER", true, 0}}},
+		{"schedule_periods", []expectedColumn{{"id", "TEXT", true, 1}, {"target_type", "TEXT", true, 0}, {"target_id", "TEXT", true, 0}, {"starts_at", "TEXT", true, 0}, {"ends_at", "TEXT", false, 0}, {"effective_interval_seconds", "INTEGER", true, 0}, {"effective_timeout_seconds", "INTEGER", true, 0}}},
+		{"schedule_slots", []expectedColumn{{"id", "TEXT", true, 1}, {"target_type", "TEXT", true, 0}, {"target_id", "TEXT", true, 0}, {"schedule_period_id", "TEXT", true, 0}, {"nominal_at", "TEXT", true, 0}, {"not_before_at", "TEXT", true, 0}, {"deadline_at", "TEXT", true, 0}, {"effective_interval_seconds", "INTEGER", true, 0}, {"effective_timeout_seconds", "INTEGER", true, 0}, {"state", "TEXT", true, 0}, {"lease_until", "TEXT", false, 0}, {"process_attempts", "INTEGER", true, 0}, {"cancellation_reason", "TEXT", false, 0}, {"started_at", "TEXT", false, 0}, {"finished_at", "TEXT", false, 0}}},
+	} {
+		if err := validateTable(ctx, query, table.name, table.columns); err != nil {
+			return corruptQueryError(ctx, "invalid "+table.name+" table", err)
+		}
+	}
+	return validateMigrationObjects(ctx, query, hostMigrationSQL)
+}
+
+// validateMigrationObjects compares every explicit CREATE statement with SQLite's
+// normalized schema text. This detects weakened CHECK, FK, partial-index, and unique
+// definitions that column metadata alone cannot see.
+func validateMigrationObjects(ctx context.Context, query queryer, source string) error {
+	for _, statement := range splitCreateStatements(source) {
+		if statement == "" {
+			continue
+		}
+		fields := strings.Fields(statement)
+		if len(fields) < 3 || fields[0] != "CREATE" {
+			return corruptError("host migration contains an unexpected statement", nil)
+		}
+		kindIndex := 1
+		if fields[kindIndex] == "UNIQUE" {
+			kindIndex++
+		}
+		if kindIndex+1 >= len(fields) {
+			return corruptError("host migration contains an invalid CREATE statement", nil)
+		}
+		kind, name := strings.ToLower(fields[kindIndex]), fields[kindIndex+1]
+		var actual string
+		if err := query.QueryRowContext(ctx, "SELECT sql FROM sqlite_schema WHERE type=? AND name=?", kind, name).Scan(&actual); err != nil {
+			return corruptQueryError(ctx, "missing host schema object "+name, err)
+		}
+		if strings.Join(strings.Fields(actual), " ") != strings.Join(strings.Fields(statement), " ") {
+			return corruptError("host schema object "+name+" differs", nil)
+		}
+	}
+	return nil
+}
+
+func splitCreateStatements(source string) []string {
+	var statements []string
+	var current []string
+	trigger := false
+	for _, line := range strings.Split(source, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if len(current) == 0 && trimmed == "" {
+			continue
+		}
+		if len(current) == 0 {
+			trigger = strings.HasPrefix(trimmed, "CREATE TRIGGER ")
+		}
+		current = append(current, line)
+		terminal := !trigger && strings.HasSuffix(trimmed, ";") || trigger && trimmed == "END;"
+		if terminal {
+			statements = append(statements, strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.Join(current, "\n")), ";")))
+			current = nil
+			trigger = false
+		}
+	}
+	return statements
+}
+
 func validateUniqueUsernameIndex(ctx context.Context, query queryer) error {
 	rows, err := query.QueryContext(ctx, `
 		SELECT name

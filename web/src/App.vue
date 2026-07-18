@@ -9,7 +9,7 @@ provide(authKey, auth)
 watch(
   () => route.path,
   () => {
-    document.querySelector<HTMLElement>('#main-content')?.focus()
+    document.querySelector<HTMLElement>('#main-content')?.focus({ preventScroll: true })
   },
   { flush: 'post' },
 )

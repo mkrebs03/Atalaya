@@ -22,6 +22,13 @@ async function submitPasswordChange(page: import('@playwright/test').Page) {
 }
 
 async function mockAuthenticatedLogin(page: import('@playwright/test').Page) {
+  await page.route('**/api/v1/hosts?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], next_cursor: null }),
+    })
+  })
   await page.route('**/api/v1/auth/login', async (route) => {
     await route.fulfill({
       status: 200,
@@ -45,9 +52,11 @@ test('protects direct routes and validates credentials', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('incorrectos')
   await submitLoginForm(page)
   await expect(page).toHaveURL('/')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Servidor preparado.')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('La torre recibe señal.')
+  await expect(page.getByRole('heading', { name: 'Oracle' })).toBeVisible()
+  await expect(page.getByText('12,5 %').first()).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Servidor preparado.')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('La torre recibe señal.')
 })
 
 test('changes password, revokes another session, and logs out', async ({ browser, page }) => {
@@ -78,17 +87,34 @@ test('changes password, revokes another session, and logs out', async ({ browser
   await page.getByLabel('Confirmar nueva contraseña').fill(password)
   await page.getByRole('button', { name: 'Cambiar contraseña' }).click()
   await expect(page.getByRole('status')).toContainText('actualizada')
-  await page.getByRole('button', { name: 'Salir' }).click()
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click()
   await expect(page).toHaveURL(/\/login/)
   await secondContext.close()
 })
 
 test('authenticated shell remains usable at narrow width', async ({ page }) => {
-  await page.setViewportSize({ width: 412, height: 915 })
+  await page.setViewportSize({ width: 320, height: 800 })
   await login(page)
   await expect(page.getByRole('navigation', { name: 'Principal' })).toBeVisible()
+  await expect
+    .poll(() => page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
+    .toBe(true)
+  await page.getByRole('link', { name: /Abrir Oracle\. Estado:/ }).click()
+  await expect(page).toHaveURL(/\/hosts\//)
+  await expect(page.getByRole('heading', { level: 1, name: 'Oracle' })).toBeVisible()
+  await expect(page.getByText('12,5 %').first()).toBeVisible()
+  await expect(page.getByText('Direcciones · 100.64.0.10')).toBeVisible()
+  await expect(page.getByRole('row', { name: /\/.*ext4.*Presente.*25 %.*96 GiB/ })).toBeVisible()
+  await expect
+    .poll(() => page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
+    .toBe(true)
   await page.getByRole('link', { name: 'Cuenta' }).click()
   await expect(page.getByRole('heading', { name: 'Cambiar contraseña' })).toBeVisible()
+  await expect.poll(() => page.evaluate('window.scrollY')).toBe(0)
+  await expect.poll(() => page.evaluate('document.activeElement?.id')).toBe('main-content')
+  await expect
+    .poll(() => page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
+    .toBe(true)
 })
 
 test('handles an API 401 during an active SPA operation', async ({ page }) => {
@@ -115,6 +141,20 @@ test('handles an API 401 during an active SPA operation', async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/)
   await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Principal' })).toHaveCount(0)
+})
+
+test('redirects when host polling discovers an expired session', async ({ page }) => {
+  await login(page)
+  await page.route('**/api/v1/hosts?*', async (route) => {
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'authentication_required' } }),
+    })
+  })
+  await page.reload()
+  await expect(page).toHaveURL(/\/login$/)
+  await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible()
 })
 
 test('handles csrf_failed in SPA and fetches a fresh CSRF token', async ({ page }) => {

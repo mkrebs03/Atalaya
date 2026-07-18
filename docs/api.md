@@ -178,6 +178,114 @@ enrolamiento usan `revoked_at` y no el ciclo de archivado.
 - `GET /api/v1/enrollment-tokens`
 - `DELETE /api/v1/enrollment-tokens/{id}`
 
+Fase 2A implementa solo los tres endpoints read-only siguientes; enrolamiento y
+mutaciones quedan en Fase 2B. Todos exigen sesion. `limit` tiene default 50 y maximo
+100; `cursor` es opaco. Limit/cursor invalido responde 400
+`validation_failed` con `fields`, sesion ausente o invalida responde 401
+`authentication_required`, y host ausente, oculto o con bootstrap incompleto responde
+404 `not_found`.
+
+Hosts usan keyset `ORDER BY display_name COLLATE NOCASE ASC, id ASC`; el cursor codifica
+la ultima tupla `(display_name normalizado, id)`. Filesystems usan
+`ORDER BY mount_point ASC, id ASC` y cursor equivalente. No hay snapshot aislado entre
+paginas: cambios concurrentes pueden mover items; el cliente puede reiniciar desde la
+primera pagina para obtener una vista nueva.
+
+### `GET /api/v1/hosts?limit=&cursor=`
+
+```json
+{
+  "items": [{
+    "id": "opaque-id", "display_name": "Oracle",
+    "administrative_state": "pending", "observed_state": "unknown", "stale": false,
+    "last_attempt_at": null, "last_success_received_at": null,
+    "freshness_deadline_at": null, "consecutive_failures": 0,
+    "cpu_used_percent": null, "memory_used_bytes": null,
+    "memory_total_bytes": null, "uptime_seconds": null,
+    "tailscale": null, "warnings": [], "agent_version": null,
+    "protocol_version": null, "most_constrained_filesystem": null,
+    "version": 1
+  }],
+  "next_cursor": null
+}
+```
+
+`last_attempt_at` es null solo mientras nunca hubo intento. `last_success_received_at`
+y `freshness_deadline_at` son null mientras nunca hubo snapshot valido. Las cuatro
+metricas actuales, `tailscale`, versiones del agente y `most_constrained_filesystem`
+son nullable cuando nunca hubo dato valido. Bytes son
+enteros JSON no negativos, uptime usa segundos y porcentajes numeros 0-100.
+El host local completado comienza `pending/unknown`; su primer snapshot valido cambia
+el estado administrativo a `active` y el observado a `healthy` o `degraded`.
+`most_constrained_filesystem` considera solo filesystems `selected=true`,
+`present=true` y con total valido; es null si ninguno califica. `warnings` es una lista
+de codigos string seguros reportados o derivados por servidor, incluido `clock_skew`.
+
+### `GET /api/v1/hosts/{id}`
+
+Devuelve el mismo objeto summary, agrega `agent_url` y `snapshot`, envia
+`Cache-Control: no-store` y strong `ETag: "<version>"`. `If-None-Match` es opcional;
+si coincide responde 304 sin body y conserva `no-store`.
+
+```json
+{
+  "id":"opaque-id", "display_name":"Oracle", "administrative_state":"active",
+  "observed_state":"degraded", "stale":false,
+  "last_attempt_at":"2026-07-17T12:00:00Z",
+  "last_success_received_at":"2026-07-17T12:00:00Z",
+  "freshness_deadline_at":"2026-07-17T12:01:20Z", "consecutive_failures":0,
+  "cpu_used_percent":12.5, "memory_used_bytes":1024, "memory_total_bytes":4096,
+  "uptime_seconds":12345,
+  "tailscale":{"state":"connected","hostname":"oracle-vm.tailnet.ts.net","addresses":["100.64.0.1"]},
+  "warnings":["clock_skew"], "agent_version":"dev", "protocol_version":1,
+  "most_constrained_filesystem":null,
+  "agent_url":"https://oracle-vm.tailnet.ts.net:9474",
+  "snapshot":{
+    "received_at":"2026-07-17T12:00:00Z", "observed_at":"2026-07-17T11:50:00Z",
+    "hostname":"oracle-vm", "boot_id":"opaque-linux-boot-id", "uptime_seconds":12345,
+    "cpu_used_percent":12.5, "memory_used_bytes":1024, "memory_total_bytes":4096,
+    "tailscale":{"state":"connected","hostname":"oracle-vm.tailnet.ts.net","addresses":["100.64.0.1"]},
+    "collection_warnings":[]
+  },
+  "version":1
+}
+```
+
+`snapshot` es null si nunca hubo exito. Dentro de snapshot, `boot_id`, uptime, CPU y
+ambos campos de memoria son nullable con las mismas unidades; los dos campos de
+memoria son null como par. `tailscale` siempre es objeto con el mismo enum y
+nullability del wire del agente. `received_at`, `observed_at`, `hostname` y
+`collection_warnings` existen en todo snapshot persistido.
+
+`version` incrementa ante cualquier cambio visible del detalle: snapshot/pull,
+filesystems, warnings, estado observado, transicion stale persistida, transicion
+unreachable y futura configuracion. Por ello el ETag es strong. Futuras mutaciones con
+`If-Match` pueden competir con un pull y responder 412 por diseno.
+
+La razon interna de cancelacion de schedules admite `missed_deadline`,
+`target_disabled`, `target_archived` y `target_changed`; no forma parte actualmente
+de las respuestas publicas de hosts.
+
+### `GET /api/v1/hosts/{id}/filesystems?limit=&cursor=`
+
+```json
+{
+  "items": [{
+    "id":"opaque-filesystem-id", "identity_kind":"uuid", "mount_point":"/",
+    "device":"/dev/sda1", "mount_root":"/", "major_minor":"8:1", "fs_type":"ext4",
+    "selected":true, "present":true, "used_bytes":1024, "total_bytes":4096,
+    "available_bytes":3072, "last_observed_at":"2026-07-17T12:00:00Z", "version":1
+  }],
+  "next_cursor": null
+}
+```
+
+`identity_kind` es `uuid|fallback`. Mount point, device, mount root, major:minor y
+tipo son strings no vacios. Los tres campos byte y `last_observed_at` son nullable si
+no existe observacion valida; bytes son enteros no negativos. La lista conserva
+filesystems ausentes con `present=false`. Descubrimiento excluye exactamente la lista
+cerrada de `fs_type` definida en `spec.md` y el modelo de dominio.
+
 Crear token devuelve el secreto una vez en la respuesta autenticada. Listarlo despues
 solo muestra metadata, estado y expiracion. Esta es una excepcion a la regla general de
 secretos y el frontend solo lo conserva en memoria mientras el administrador lo copia.
@@ -391,9 +499,9 @@ Metricas permitidas en threshold v1: `cpu_used_percent` y
 de 0 a 86400 segundos; cero permite firing en primera evaluacion valida.
 
 `host_unreachable.for_seconds` se mide directamente desde ultimo pull exitoso, no desde
-momento en que estado visual pasa a unreachable. Primer fallo programado inicia pending;
+momento en que estado visual pasa a unreachable. El primer fallo operativo programado inicia pending;
 regla dispara cuando edad del ultimo exito alcanza `for_seconds` y sigue existiendo al
-menos un fallo. Para host nunca observado se mide desde enrolamiento.
+menos un fallo operativo. Para host nunca observado se mide desde enrolamiento.
 
 `check_failed` en modo duration mide desde primer resultado programado fallido
 consecutivo; modo attempts dispara al alcanzar cantidad indicada. No agrega otra
@@ -498,12 +606,12 @@ No sustituye snapshot autenticado.
 
 ### `GET /agent/v1/snapshot`
 
-Respuesta conceptual:
+Contrato JSON normativo exacto:
 
 ```json
 {
   "protocol_version": 1,
-  "agent_version": "semver",
+  "agent_version": "dev",
   "host": {
     "hostname": "oracle-vm",
     "observed_at": "2026-07-15T12:00:00Z",
@@ -518,6 +626,7 @@ Respuesta conceptual:
     "hostname": "oracle-vm",
     "addresses": ["100.64.0.1"]
   },
+  "collection_warnings": [],
   "filesystems": [
     {
       "mount_point": "/",
@@ -534,27 +643,74 @@ Respuesta conceptual:
 }
 ```
 
-`fs_uuid` es nullable. Agente lo obtiene sin ejecutar comandos privilegiados cuando
-puede correlacionar el dispositivo con identificadores expuestos por Linux. Servidor
-usa UUID, `mount_root` y mount point como identidad preferida; si falta, aplica el
-fallback documentado en el modelo de dominio sin fusionar entidades por heuristica.
-`major_minor` es diagnostico y apoya la normalizacion del dispositivo del fallback; no
-forma parte de la identidad.
+`protocol_version` es el entero exacto `1`. `agent_version` es string de 1 a 64
+caracteres: builds locales permiten `dev` y releases usan semver. `host.hostname` es
+string no vacio y `host.observed_at` RFC 3339 UTC. `boot_id` es string no vacio o
+null; uptime es entero >=0 o null; CPU es numero 0-100 o null. Memoria usada/total son
+enteros >=0 y `used <= total`, o ambos null.
+
+Todos los campos enumerados del objeto raiz, `host`, `tailscale` y cada filesystem son
+requeridos. Los campos nullable deben aparecer con un valor valido o `null`; omitirlos
+no equivale a enviarlos como `null`. Objetos, arrays y campos no-null no aceptan
+`null`, y cualquier campo adicional invalida el payload.
+
+`tailscale` siempre es objeto. `state` es
+`connected|stopped|needs_login|unknown`, `hostname` es string no vacio o null y
+`addresses` siempre es array de strings, posiblemente vacio. `filesystems` siempre es
+array, posiblemente vacio. Cada filesystem contiene exactamente `mount_point`,
+`device`, `fs_uuid`, `mount_root`, `major_minor`, `fs_type`, `used_bytes`,
+`total_bytes`, `available_bytes`: los campos string salvo `fs_uuid` son no vacios;
+`fs_uuid` es string no vacio o null; bytes son enteros >=0, con `used <= total` y
+`available <= total`.
+
+`collection_warnings` es un campo requerido, no-null, y siempre es un array de codigos
+unicos, posiblemente `[]`. Su omision o `null` invalida el payload.
+Codigos exactos iniciales:
+`cpu_unavailable`, `memory_unavailable`, `uptime_unavailable`,
+`boot_id_unavailable`, `filesystems_partial`, `filesystems_unavailable`,
+`tailscale_unavailable`. Un warning no invalida los campos sanos. `clock_skew` nunca
+viaja en este wire: el servidor lo agrega a `warnings` de su API/UI cuando la diferencia
+absoluta entre `observed_at` y `received_at` supera cinco minutos.
+
+Una lista de filesystems sin warning es autoritativa. `filesystems_partial` indica que
+solo deben actualizarse entradas recibidas; `filesystems_unavailable` conserva todo el
+estado anterior. Son mutuamente excluyentes; recibir ambos hace el payload invalido de
+protocolo, falla el pull y no muta snapshot, filesystems, estado ni scheduling de exito.
+El slot se cierra como fallido y se crea el siguiente slot nominal, pero un fallo de
+protocolo no modifica ningun campo de `hosts`: estado observado, version, timestamps y
+contadores conservan sus valores previos. Tampoco modifica snapshot ni filesystems.
+No contribuye a `consecutive_failures` ni al umbral `unreachable`; estos solo incluyen
+fallos operativos de red, TLS, autenticacion, timeout o payload excesivo.
+
+Ante fallo de un collector, el campo afectado usa su null/objeto/array seguro y se
+agrega el warning correspondiente. En particular, Tailscale no disponible produce
+`{"state":"unknown","hostname":null,"addresses":[]}` mas
+`tailscale_unavailable`. Un estado desconectado usa `stopped` o `needs_login`, conserva
+hostname/addresses parciales que entregue la CLI y degrada el host sin inventar el
+warning de indisponibilidad.
+
+El agente es el unico proceso que parsea mountinfo, correlaciona `/dev/disk/by-uuid`,
+normaliza UUID/device y produce este wire (`fs_uuid` nullable). El servidor valida los
+campos ya normalizados, elige UUID-first o fallback y calcula el codec BLOB v1
+documentado en el modelo de dominio. UUID inaccesible/ambiguo ya llega como null sin
+warning. `major_minor` es solo diagnostico y no forma parte de la identidad.
+Si `device` es absoluto debe ser exactamente `filepath.Clean(device)`; los sources no
+absolutos se conservan byte por byte.
 
 CPU se calcula en agente desde dos lecturas de `/proc/stat` separadas por 250 ms:
 `100 * (delta_total - delta_idle - delta_iowait) / delta_total`. Memoria usada es
 `MemTotal - MemAvailable`. Si contador no avanza o campos no existen, valor JSON es
-`null`; servidor conserva snapshot pero no crea muestra para esa metrica. Totales y
-usados de memoria tambien pueden ser `null` como par.
+`null`; servidor conserva el campo actual pero Fase 2A no crea `MetricSample`. Totales
+y usados de memoria tambien pueden ser `null` como par.
 
 `observed_at` es diagnostico reportado por agente. Servidor agrega `received_at` al
 persistir; orden de series y evaluaciones usan ese timestamp, evitando depender del
 reloj del host. Frescura y staleness usan `freshness_deadline_at`, calculado desde el
 primer slot creado despues del ultimo exito y nunca avanzado por un fallo.
 
-Payload tiene limite estricto. Campos nuevos deben ser opcionales dentro de version o
-requieren nueva version incompatible. Servidor acepta versiones explicitamente
-soportadas; no intenta adivinar formatos.
+Payload tiene limite estricto de 256 KiB. Campos nuevos deben ser opcionales dentro de
+version o requieren nueva version incompatible. Servidor acepta versiones
+explicitamente soportadas; no intenta adivinar formatos.
 
 ## 10. Compatibilidad
 

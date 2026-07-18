@@ -1,10 +1,9 @@
 # Atalaya
 
 Atalaya es un dashboard personal para observar hosts Linux y servicios self-hosted
-dentro de una red Tailscale. La Fase 1A agrega al bootstrap reproducible configuracion
-YAML estricta, clave maestra, SQLite con migraciones y creacion local del administrador.
-La interfaz Vue embebida y la salud de proceso siguen disponibles mientras el resto de
-la autenticacion de Fase 1 se implementa.
+dentro de una red Tailscale. Tras completar persistencia y autenticacion, la Fase 2A
+agrega el agente local de Oracle, scheduling persistente y vistas read-only de estado
+actual. El alcance exacto de cada slice permanece definido por la documentacion.
 
 El producto completo sigue el contrato de [`spec.md`](spec.md). El indice y la
 precedencia de decisiones tecnicas estan en [`docs/README.md`](docs/README.md).
@@ -65,23 +64,57 @@ YAML
 chmod 0600 build/dev/server.yaml
 ```
 
-Los paths relativos se resuelven desde el directorio del YAML. Para construir, migrar,
-crear el administrador y arrancar el ejecutable unico:
+Los paths relativos se resuelven desde el directorio del YAML. Para construir y
+preparar servidor y administrador:
 
 ```bash
 make build
 ARCH=amd64 # usa arm64 en Linux aarch64
 ./build/atalaya-linux-${ARCH} migrate --config build/dev/server.yaml
 ./build/atalaya-linux-${ARCH} admin create --config build/dev/server.yaml
-./build/atalaya-linux-${ARCH} server --config build/dev/server.yaml
 ```
 
 `admin create` exige una terminal interactiva y solicita la password dos veces sin
 eco. El servidor puede arrancar antes de crear el administrador, pero nunca lo crea
-automaticamente. Luego comprueba la salud binaria:
+automaticamente.
+
+Para el agente local, prepara los directorios padre y ejecuta bootstrap despues de
+migrar/crear admin. Bootstrap genera `agent.yaml` modo exacto `0640` y credential modo
+exacto `0600`; no instala unidades systemd ni configura Tailscale:
+
+```bash
+./build/atalaya-linux-${ARCH} bootstrap local-agent \
+  --server-config build/dev/server.yaml \
+  --agent-config build/dev/agent.yaml \
+  --agent-url https://oracle.example.ts.net:9474
+```
+
+El YAML generado contiene exactamente estas claves; paths relativos se resuelven
+desde su directorio:
+
+```yaml
+listen: 127.0.0.1:9474
+server_url: http://127.0.0.1:8080
+advertised_url: https://oracle.example.ts.net:9474
+credential_path: agent-credential
+```
+
+`server_url` se deriva del `public_url` del server config y `advertised_url` reproduce
+el `--agent-url` validado. Configura manualmente Tailscale Serve para publicar el
+listener 9474, inicia primero agente y despues inicia o reinicia servidor, en terminales
+separadas:
+
+```bash
+./build/atalaya-linux-${ARCH} agent --config build/dev/agent.yaml
+./build/atalaya-linux-${ARCH} server --config build/dev/server.yaml
+```
+
+Finalmente valida salud del servidor, salud del agente y que Oracle aparezca en la UI
+autenticada:
 
 ```bash
 curl -i http://127.0.0.1:8080/healthz
+curl -i http://127.0.0.1:9474/agent/v1/healthz
 ```
 
 Para trabajar con hot reload, usa una copia del YAML con
@@ -111,26 +144,34 @@ o falta `node_modules`. Playwright siempre arranca el binario Go host recien con
 desde `build/atalaya`; no reutiliza otro servidor ni usa Vite Preview. Cada ejecucion
 crea config, clave `0600` y DB aisladas bajo `build/e2e`.
 
-## CLI de Fase 1A
+## CLI implementada hasta Fase 2A
 
 `atalaya version` y las ayudas terminan con codigo `0`. Errores operativos y los
-comandos reservados `agent`, `backup` y `verify` terminan con `1`. Tambien usan `1` una
+comandos reservados `backup` y `verify` terminan con `1`. Tambien usan `1` una
 clave o DB invalida, un fallo de terminal, passwords no coincidentes o un administrador
 activo ya existente. Uso, argumentos, YAML o valores de configuracion invalidos,
 incluidos comando ausente o desconocido, terminan con `2`.
 
-Los comandos implementados de este slice comparten el mismo archivo:
+Comandos implementados:
 
 ```text
 atalaya server [--config <path>]
 atalaya migrate [--config <path>]
 atalaya admin create [--config <path>] [--username <name>]
+atalaya admin reset-password [--config <path>]
+atalaya agent --config <path>
+atalaya bootstrap local-agent --server-config <path> --agent-config <path> \
+  --agent-url <url> [--display-name <name>] [--listen <addr>] \
+  [--credential-path <path>]
 ```
 
-El default es `/etc/atalaya/server.yaml`. No existen overrides de configuracion por
-variables de entorno en Fase 1A.
+Solo `server`, `migrate` y los subcomandos `admin` comparten server config con default
+`/etc/atalaya/server.yaml`. `agent --config` exige path explicito y no tiene default.
+Bootstrap exige `--server-config`, `--agent-config` y `--agent-url`; si se omiten sus
+flags opcionales usa display name `Oracle`, listener `127.0.0.1:9474` y credential path
+junto al agent config. No existen overrides por variables de entorno.
 
-Login, sesiones, CSRF, reset de password, agentes y operacion Tailscale se implementan
-en los siguientes slices. Consulta el
+El agente local y sus vistas read-only pertenecen a Fase 2A. Enrolamiento remoto y
+gestion de hosts/filesystems llegan en Fase 2B. Consulta el
 [plan de implementacion](docs/implementation-plan.md) para el alcance y las condiciones
 de salida.

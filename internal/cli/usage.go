@@ -12,12 +12,36 @@ Commands:
   server   Start the Atalaya HTTP server
   migrate  Apply database migrations without starting HTTP
   admin    Manage the local administrator
-  agent    Reserved for the monitoring agent
+  agent    Start the Atalaya monitoring agent
+  bootstrap  Bootstrap local Atalaya resources
   backup   Reserved for data backup
   verify   Reserved for installation verification
   version  Print the Atalaya version
   help     Show command help
 `)
+}
+
+func writeBootstrapUsage(output io.Writer) {
+	fmt.Fprint(output, "Usage: atalaya bootstrap <command> [options]\n\nCommands:\n  local-agent  Bootstrap the local Oracle agent\n")
+}
+
+func writeBootstrapLocalAgentUsage(output io.Writer) {
+	fmt.Fprint(output, `Usage: atalaya bootstrap local-agent --server-config <path> --agent-config <path> --agent-url <url> [options]
+
+Required:
+  --server-config <path>   Server YAML configuration
+  --agent-config <path>    Agent YAML configuration to create or verify
+  --agent-url <url>        Advertised https://<fqdn>.ts.net:9474 URL
+
+Options:
+  --display-name <name>    Host display name (default Oracle)
+  --listen <addr>          Agent listener (default 127.0.0.1:9474)
+  --credential-path <path> Credential file (default beside agent config)
+`)
+}
+
+func writeAgentUsage(output io.Writer) {
+	fmt.Fprint(output, "Usage: atalaya agent --config <path>\n\nOptions:\n  --config <path>  Agent YAML configuration (required)\n")
 }
 
 func writeServerUsage(output io.Writer) {

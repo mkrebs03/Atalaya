@@ -16,6 +16,8 @@
   detalle de implementacion para persistencia segura y administrador inicial.
 - [Diseno de Fase 1B](superpowers/specs/2026-07-17-phase-1b-authentication-design.md):
   detalle de sesiones, autenticacion HTTP, CSRF y reset local.
+- [Diseno de Fase 2A](superpowers/specs/2026-07-17-phase-2a-local-agent-current-state-design.md):
+  agente local de Oracle, bootstrap, scheduler y estado actual read-only.
 
 La interfaz de Fase 1 mantiene administrador y CSRF exclusivamente en memoria del
 navegador. La cookie `HttpOnly` restaura la sesion tras recargar; no se usa
@@ -77,8 +79,10 @@ Decisiones cerradas:
   reinterpretan slots existentes.
 - Cada periodo usa cadencia nominal fija. Slots que superaron su deadline durante
   downtime se cancelan y un periodo nuevo se ancla al presente, sin catch-up.
-- `unreachable` requiere tres fallos programados consecutivos y alcanzar el deadline
+- `unreachable` requiere tres fallos operativos programados consecutivos y alcanzar el deadline
   del tercer slot fallido.
+- `FailureProtocol` cierra y reprograma el slot, pero no cuenta como fallo operativo ni
+  modifica la representacion observable persistida del host.
 - `DELETE` archiva siempre los recursos configurables; no hay borrado fisico desde la
   UI.
 - Los checks solo alcanzan Tailscale y CIDRs privados autorizados; destinos publicos
@@ -103,6 +107,8 @@ Decisiones cerradas:
   [aprobado](superpowers/specs/2026-07-16-phase-1a-persistence-admin-design.md).
 - La Fase 1B de autenticacion del servidor usa el diseno subordinado
   [aprobado](superpowers/specs/2026-07-17-phase-1b-authentication-design.md).
+- La Fase 2A del agente local y estado actual usa el diseno subordinado
+  [aprobado](superpowers/specs/2026-07-17-phase-2a-local-agent-current-state-design.md).
 - Modo `development` explicito; cookie sin `Secure` solo con listener y origen en
   loopback.
 - `Cache-Control: no-store` en autenticacion y respuestas con secretos efimeros.

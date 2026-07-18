@@ -3,14 +3,13 @@ import { RouterLink } from 'vue-router'
 </script>
 
 <template>
-  <main id="main-content" class="not-found" tabindex="-1">
+  <main id="main-content" class="not-found route-view" tabindex="-1">
     <div class="not-found__frame">
       <p class="not-found__code" aria-hidden="true">404</p>
       <p class="not-found__eyebrow">Coordenada fuera de alcance</p>
       <h1 class="not-found__title">Esta ruta no está en el mapa.</h1>
       <p class="not-found__copy">
-        El bootstrap está operativo, pero la dirección solicitada no corresponde a una vista de
-        Atalaya.
+        La dirección solicitada no corresponde a una vista disponible en este puesto de observación.
       </p>
       <RouterLink class="not-found__link" to="/">Volver al puesto de observación</RouterLink>
     </div>
@@ -19,7 +18,7 @@ import { RouterLink } from 'vue-router'
 
 <style scoped>
 .not-found {
-  min-height: 100svh;
+  min-height: calc(100svh - 8rem);
   display: grid;
   place-items: center;
   padding: clamp(1.25rem, 5vw, 5rem);

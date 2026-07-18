@@ -88,7 +88,8 @@ en puerto 9474. El servidor consulta `https://<magicdns>:9474`. En Oracle ambas 
 coexisten: dashboard en 443 y agente en 9474. Certificados y renovacion pertenecen a
 Tailscale Serve, no al proyecto.
 
-El puerto HTTPS 9474 es el default fijo de v1 y queda registrado en `agent_url`. El
+El puerto HTTPS 9474 es fijo en v1 y `agent_url` acepta exclusivamente
+`https://<fqdn>.ts.net:9474`. El
 instalador verifica que la CLI instalada pueda publicar simultaneamente HTTPS 443 y
 9474, configura ambas rutas y confirma el estado efectivo. Si falta una capacidad,
 falla mostrando version detectada, operacion no soportada y matriz de compatibilidad de
@@ -127,6 +128,10 @@ su credencial; no usa un token de UI ni requiere una segunda instalacion manual.
 - No persistir historico ni evaluar alertas en v1.
 - No ejecutar comandos enviados por servidor.
 - No aceptar scripts, paths arbitrarios ni plugins desde UI.
+
+Se inicia con `atalaya agent --config <path>`. Su YAML estricto contiene `listen`,
+`server_url`, `advertised_url` y `credential_path`; paths relativos se resuelven desde
+el directorio del YAML.
 
 ### Frontend
 
@@ -180,10 +185,30 @@ del modulo que los consume.
 10. Primer pull valido cambia host de `pending` a observado.
 
 Para Oracle, `atalaya bootstrap local-agent` crea de forma idempotente el host,
-credencial cifrada y configuracion del agente dentro de una operacion local. El
+credencial cifrada y configuracion del agente. Una primera transaccion crea o recupera
+el unico `source=local` incompleto; despues se escriben credencial y YAML atomicamente,
+y una segunda transaccion fija `bootstrap_completed_at` y agenda el primer slot. El
+host incompleto no es visible ni schedulable. El
 instalador server reutiliza ese comando y despues instala
 `atalaya-agent.service`. El primer pull usa el mismo protocolo y cambia el host a
 observado.
+
+La interfaz completa del comando es `atalaya bootstrap local-agent --server-config
+<path> --agent-config <path> --agent-url <url> [--display-name <name>] [--listen
+<addr>] [--credential-path <path>]`. `server_url` deriva de `public_url` del server
+config y `advertised_url` es exactamente `--agent-url` tras validarlo. Se escribe
+primero la credencial `0600` y luego la config `0640`, mediante temporales en el mismo
+directorio, fsync y rename sin sobrescritura. Temporales se limpian al fallar. Un
+archivo existente valido se verifica y nunca se reemplaza; uno ausente se crea. Si
+falla la config despues de crear la credencial, esa credencial valida y la
+identidad/secreto en DB permanecen y el rerun completa el YAML.
+
+Credential canonica es base64url sin padding de 32 bytes (43 caracteres) mas LF; al
+verificar se tolera solo ausencia del LF final y se compara el secreto decodificado en
+tiempo constante. Config se compara semanticamente tras YAML estricto de documento
+unico: listen textual validado, URLs canonicas y credential path absoluto limpio;
+orden/comentarios no cuentan. CR, whitespace/padding extra, YAML desconocido,
+multi-documento, permisos distintos o valores diferentes fallan sin reescritura.
 
 Reintentar una respuesta perdida no debe consumir varios hosts. Peticion de
 enrolamiento incluye `request_id` aleatorio persistido por agente para idempotencia.
@@ -198,25 +223,37 @@ devolver credencial.
    `not_before_at` vencio.
 2. La restriccion unica por target impide dos slots no terminales y el lease impide
    pulls concurrentes dentro del proceso.
-3. Consulta snapshot con timeout menor que intervalo y jitter maximo de 5 segundos.
-4. Valida version, identidad, timestamp razonable, tipos y limites de payload.
-5. En una transaccion actualiza estado actual, agrega muestras crudas con `slot_id`,
-   completa el slot y, si el target sigue habilitado, crea exactamente el siguiente
-   slot de la cadencia nominal con jitter pequeno.
+3. Consulta snapshot con defaults de intervalo 60 segundos, timeout 10 segundos,
+   jitter 0-5 segundos, lease de timeout mas 5 segundos, concurrencia global 4 y body
+   maximo 256 KiB.
+4. Valida version, identidad, timestamp razonable, warnings, tipos y limites de
+   payload. Clock skew absoluto mayor a cinco minutos degrada sin invalidar el resto.
+5. En una transaccion actualiza estado actual, completa el slot y, si el target sigue
+   habilitado, crea exactamente el siguiente slot de la cadencia nominal con jitter
+   pequeno. Fase 2A no crea muestras crudas; `MetricSample` comienza en Fase 3 y
+   entonces comparte esta frontera transaccional.
 6. Libera el lease despues del commit.
 7. Evaluador procesa reglas relacionadas despues de persistencia.
+
+Scheduler tambien materializa la transicion stale al llegar
+`freshness_deadline_at`, siempre que snapshot/host sigan vigentes. Pull, cambios de
+snapshot/filesystems/warnings/estado, stale y unreachable incrementan `Host.version`;
+el detalle puede usarlo como strong ETag y un futuro `If-Match` puede perder contra el
+polling con 412.
 
 Cada slot programado captura `effective_interval_seconds`,
 `effective_timeout_seconds`, `nominal_at`, `not_before_at` y `deadline_at` al crearse;
 cambios posteriores no alteran ese intento ni los deadlines ya calculados. El slot y
-su lease se persisten antes de iniciar red. Un fallo programado
-completado conserva ultimo snapshot e incrementa fallos
-consecutivos. Intentos manuales, schedules omitidos durante downtime e interrupciones
+su lease se persisten antes de iniciar red. Un fallo operativo programado completado
+conserva ultimo snapshot e incrementa fallos consecutivos. Un `FailureProtocol` solo
+cierra el slot y crea el siguiente nominal: no cambia estado, version, contadores,
+timestamps, snapshot o filesystems. Intentos manuales, schedules omitidos durante downtime e interrupciones
 por shutdown no cuentan. Host observado pasa a `unreachable` solo cuando acumula tres
-fallos programados y se alcanza el deadline del tercer slot fallido; cada slot usa el
-intervalo que capturo al programarse. Antes queda `degraded`. Para host nunca
-observado, el primer slot parte del enrolamiento. UI muestra edad del dato; nunca
-presenta valor anterior como actual sin advertencia.
+fallos operativos programados y se alcanza el deadline del tercer slot fallido; cada slot usa el
+intervalo que capturo al programarse. Antes queda `degraded` solo si ya fue observado;
+un host nunca observado permanece `unknown` tras uno o dos fallos y hasta el deadline
+del tercer fallo. Su primer slot parte del enrolamiento. UI muestra edad del dato;
+nunca presenta valor anterior como actual sin advertencia.
 
 Despues de un exito o fallo completado dentro de su deadline, el scheduler crea el
 siguiente slot con

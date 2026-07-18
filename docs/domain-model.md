@@ -47,6 +47,9 @@ autenticado puede emitir una sesion nueva para el request actual.
 ### Host
 
 - Nombre visible unico.
+- Procedencia `source=local|enrolled`; solo puede existir un host `local`.
+- `bootstrap_completed_at` nullable. Un host local incompleto no es visible ni se
+  agenda.
 - Nombre MagicDNS o URL de agente unica.
 - Estado administrativo: `pending`, `active`, `disabled`.
 - Archivado: `archived_at` nullable. Un host archivado no se agenda y solo puede
@@ -57,11 +60,21 @@ autenticado puede emitir una sesion nueva para el request actual.
   slot siguiente mas 5 segundos. Fallos y reanclajes no lo avanzan. Un cambio de
   configuracion no reescribe ese valor.
 - Credencial de agente cifrada y version de protocolo observada.
+- `collection_generation` interno aumenta cuando cambia URL, credencial, intervalo o
+  timeout de pull; permite descartar resultados en vuelo sin depender de `version`.
+- `version` incrementa ante todo cambio visible del detalle: pulls, snapshot,
+  filesystems, warnings, estado observado, stale persistido, unreachable y
+  configuracion. Es la fuente del strong ETag y puede hacer fallar un futuro
+  `If-Match` con 412 si compite con polling.
 
-`unreachable` requiere tres intentos programados fallidos consecutivos y alcanzar el
+`unreachable` requiere tres intentos operativos programados fallidos consecutivos y alcanzar el
 deadline del tercer slot; cada slot conserva su intervalo efectivo. No cuentan
-ejecuciones manuales, schedules omitidos ni interrupciones por shutdown. No prueba si
+fallos de protocolo, ejecuciones manuales, schedules omitidos ni interrupciones por shutdown. No prueba si
 causa es host, agente, Tailscale o red.
+
+Al alcanzar `freshness_deadline_at`, scheduler persiste `stale=true` y aumenta version
+si el host/snapshot siguen vigentes. Antes de cualquier snapshot valido el estado
+observado es siempre `unknown`, nunca `healthy`.
 
 ### EnrollmentToken
 
@@ -81,11 +94,19 @@ Estado actual normalizado:
 - CPU usada, nullable si plataforma no pudo calcular intervalo valido.
 - Memoria usada y total, nullable si `/proc/meminfo` no ofrece datos validos.
 - Uptime y boot ID cuando Linux lo permita.
-- Estado Tailscale reportado, IPs y hostname no sensibles.
+- Estado Tailscale `connected|stopped|needs_login|unknown`, IPs y hostname nullable no
+  sensibles. El objeto existe siempre en wire; indisponibilidad normaliza
+  unknown/null/array vacio.
 - Version del agente.
 
 Timestamp del servidor ordena series. Timestamp del agente sirve para diagnosticar
-clock skew. Servidor rechaza o marca snapshots con desviacion excesiva.
+clock skew. Una desviacion absoluta mayor a cinco minutos agrega warning y degrada el
+host; no invalida por si sola un snapshot.
+
+`collection_warnings` conserva solo codigos seguros reportados por el agente. La API
+compone `warnings` con esos codigos y derivados del servidor; `clock_skew` pertenece
+solo a esta segunda categoria. Un snapshot valido aun con warnings reinicia fallos
+consecutivos y avanza frescura.
 
 ### Filesystem
 
@@ -95,16 +116,41 @@ Identidad dentro de host con procedencia explicita:
 - UUID de filesystem nullable, root del mount, major:minor, mount point, tipo,
   dispositivo, total, usado y disponible.
 - Descubierto, seleccionado para monitoreo o ignorado.
-- Ultima vez observado.
+- Presencia actual y ultima vez observado. Un filesystem elegible nuevo nace
+  seleccionado.
 
-Cuando existe UUID, la clave es `uuid + mount_root + mount_point`; asi un cambio de
-`/dev/sdX` no rompe la serie y dos mounts permanecen distinguibles. Sin UUID, la clave
-fallback usa dispositivo normalizado, mount root y mount point. En ambos casos, mover
-el mount crea una entidad nueva. El fallback es best-effort: si cambia cualquiera de
-sus componentes nunca se fusiona historico por heuristica.
+El parser de mountinfo decodifica exclusivamente `\040`, `\011`, `\012` y `\134`;
+cualquier otro escape o secuencia malformed invalida esa entrada. `mount_root` y
+`mount_point` deben ser absolutos y se normalizan lexicalmente con `filepath.Clean`,
+preservando case. Device/source se decodifica; si comienza con `/` se aplica el mismo
+clean lexical sin `EvalSymlinks`, y de otro modo se preservan exactamente sus bytes
+decodificados.
 
-Pseudo-filesystems como `proc`, `sysfs`, `tmpfs`, `devtmpfs`, `cgroup`, `overlay` y
-similares se excluyen por default. Exclusion exacta es lista versionada y testeada.
+UUID se obtiene del nombre bajo `/dev/disk/by-uuid`, correlacionando el target mediante
+`stat` major:minor. Se normaliza a ASCII lowercase. Si el directorio no es accesible o
+la correlacion es ambigua se usa fallback sin warning.
+
+`identity_key` es BLOB codec v1: byte inicial `0x01`, seguido por cada uno de tres
+campos en orden, cada campo como longitud en bytes `uint32` big-endian y luego sus
+bytes UTF-8. Para `identity_kind=uuid` los campos son
+`(lowercase_uuid,mount_root,mount_point)`; para `fallback`,
+`(normalized_device,mount_root,mount_point)`. `identity_kind` vive en columna separada
+y la unicidad es `(host_id,identity_kind,identity_key)`. Se rechaza UTF-8 invalido o un
+campo cuya longitud exceda uint32. Major:minor es solo diagnostico; no hay alias ni
+fusion heuristica, y cambiar cualquier componente crea entidad. Golden tests fijan
+ambos encodings y sus rechazos.
+
+La lista cerrada v1 de `fs_type` excluidos es: `autofs`, `binfmt_misc`, `bpf`,
+`cgroup`, `cgroup2`, `configfs`, `debugfs`, `devpts`, `devtmpfs`, `efivarfs`,
+`fusectl`, `hugetlbfs`, `mqueue`, `nsfs`, `overlay`, `proc`, `pstore`, `ramfs`,
+`rootfs`, `rpc_pipefs`, `securityfs`, `selinuxfs`, `squashfs`, `sysfs`, `tmpfs` y
+`tracefs`. Ningun otro tipo se excluye por nombre en v1.
+Una lista recibida sin warning es autoritativa y marca ausentes `present=false`;
+`filesystems_partial` solo actualiza entradas recibidas y `filesystems_unavailable`
+conserva todas las entradas anteriores. Son mutuamente excluyentes; ambos en el mismo
+payload invalidan el protocolo. El slot se cierra y se agenda el siguiente nominal,
+pero no cuenta como fallo operativo ni muta estado observable persistido: ningun campo
+del host, snapshot o filesystems, incluida `version`, cambia.
 
 ### ServiceCheck
 
@@ -174,8 +220,8 @@ Unidad persistida de ejecucion para host o check:
   `nominal_at + jitter maximo (5 segundos) + timeout efectivo`.
 - Estado `scheduled`, `running`, `succeeded`, `failed` o `cancelled`; `running` guarda
   un lease de `timeout efectivo + 5 segundos de margen` y contador de intentos de
-  proceso. `cancelled` exige razon `missed_deadline`, `target_disabled` o
-  `target_archived`.
+  proceso. `cancelled` exige razon `missed_deadline`, `target_disabled`,
+  `target_archived` o `target_changed`.
 - Para un host, `succeeded` exige un pull que entrego snapshot valido; cualquier otro
   intento completado es `failed`. Para un check, `succeeded` es una ejecucion que
   produjo resultado `up` o `down`; `failed` se reserva para imposibilidad interna del
@@ -192,12 +238,15 @@ cancela como `missed_deadline`, se cierra el periodo y se crea en la misma trans
 un periodo y slot nuevos anclados en `now`, sin catch-up. El slot vencido permanece en
 la cobertura esperada; nominales posteriores del downtime no se materializan, no son
 esperados y no cuentan como fallos. Shutdown libera o deja vencer el lease, sin crear
-un fallo programado.
+un fallo operativo programado.
 Desactivar o archivar cancela el slot no iniciado; una ejecucion de red ya reclamada
 puede finalizar, pero la transaccion la marca `cancelled`, no incorpora su resultado a
 estado/series/alertas y no crea otro slot.
 
 ### MetricSample
+
+Esta entidad comienza a persistirse en Fase 3. Fase 2A conserva exclusivamente estado
+actual de host/filesystem y resultado/slot de scheduling; no crea muestras raw.
 
 Series crudas separan dimensiones para consultas acotadas:
 

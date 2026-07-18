@@ -3,6 +3,7 @@ import { auth } from '@/auth/useAuth'
 import AuthenticatedLayout from '@/layouts/AuthenticatedLayout.vue'
 import AccountView from '@/views/AccountView.vue'
 import HomeView from '@/views/HomeView.vue'
+import HostDetailView from '@/views/HostDetailView.vue'
 import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
 
@@ -14,6 +15,7 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
     children: [
       { path: '', name: 'home', component: HomeView },
+      { path: 'hosts/:id', name: 'host-detail', component: HostDetailView },
       { path: 'account', name: 'account', component: AccountView },
       { path: ':pathMatch(.*)*', name: 'not-found', component: NotFoundView },
     ],

@@ -60,32 +60,38 @@ watch(
 <style scoped>
 .password-form {
   display: grid;
-  gap: 1.1rem;
+  gap: 1.25rem;
   max-width: 34rem;
 }
 .field {
   display: grid;
   gap: 0.45rem;
-  font-weight: 700;
+  font: 800 0.68rem var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .field input {
-  min-height: 3rem;
-  border: 2px solid var(--line-strong);
+  min-height: 3.25rem;
+  border: 1px solid var(--line-strong);
   background: white;
-  padding: 0.7rem;
-  font: inherit;
+  padding: 0.75rem;
+  font: 1rem var(--font-body);
+  letter-spacing: normal;
+  text-transform: none;
 }
 .form-error,
 .form-success {
   margin: 0;
-  padding: 0.75rem;
-  border-left: 0.35rem solid;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid;
+  line-height: 1.5;
 }
 .form-error {
   border-color: var(--accent-text);
   color: var(--accent-text);
 }
 .form-success {
-  border-color: var(--signal);
+  border-color: #557a00;
+  color: #3f5b00;
 }
 </style>

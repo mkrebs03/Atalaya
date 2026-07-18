@@ -117,7 +117,7 @@ func TestAdministratorInsertFailureLeavesMigratedDatabaseWithoutActiveAdmin(t *t
 	if err != nil {
 		t.Fatalf("Preflight() error = %v", err)
 	}
-	if result.SchemaVersion != 2 || result.HasActiveAdministrator {
+	if result.SchemaVersion != len(embeddedMigrations) || result.HasActiveAdministrator {
 		t.Fatalf("Preflight() = %+v", result)
 	}
 }

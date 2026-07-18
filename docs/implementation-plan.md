@@ -130,7 +130,37 @@ Condiciones de salida:
 
 Objetivo: Oracle y segundo host pueden entregar snapshots autenticados.
 
-Trabajo:
+### Fase 2A - Agente local y estado actual
+
+Primer slice: Oracle visible mediante agente local, bootstrap idempotente, scheduler
+persistente, endpoints read-only y resumen/detalle. Usa intervalo 60 segundos, timeout
+10 segundos, jitter 0-5 segundos, lease con 5 segundos de margen, concurrencia global
+4 y payload 256 KiB. Incluye warnings parciales, clock skew de cinco minutos, red
+restringida a FQDN `.ts.net:9474` y filesystems elegibles seleccionados por default.
+
+No incluye enrolamiento remoto, mutaciones de hosts/filesystems, historico, systemd ni
+instalador. El contrato detallado esta en el
+[diseno de Fase 2A](superpowers/specs/2026-07-17-phase-2a-local-agent-current-state-design.md).
+
+Condiciones de salida de 2A:
+
+- Bootstrap repetido conserva una unica identidad y credencial, y recupera de fallos
+  entre transacciones/escrituras sin reemplazar archivos validos.
+- Oracle aparece con snapshot actual real, filesystems y warnings en resumen/detalle;
+  bearer invalido responde 401 sin filtrar datos.
+- Scheduler sobrevive restart, no hace catch-up y muestra stale/unreachable con los
+  deadlines persistidos; no persiste `MetricSample` ni historico raw.
+- Agent URL, DNS, TLS, redirects, timeout y payload cumplen el contrato de seguridad;
+  agente funciona sin root.
+- `make lint`, `make test`, `make build` y `make test-e2e` pasan.
+
+### Fase 2B - Enrolamiento y gestion
+
+Completa tokens, enrolamiento de segundo host y mutaciones de hosts/filesystems.
+
+### Alcance acumulado de Fase 2, completado despues de 2B
+
+Trabajo acumulado (2A + 2B):
 
 - Implementar recoleccion Linux de CPU, memoria, uptime, boot ID y filesystems.
 - Implementar consulta segura del estado Tailscale.
@@ -155,12 +185,14 @@ Trabajo:
 - Crear resumen y detalle de hosts responsive.
 - Permitir seleccionar/ignorar filesystems y activar/desactivar hosts.
 
-Condiciones de salida:
+Condiciones de salida acumuladas, exigibles despues de 2B:
 
 - Token expirado, revocado o reutilizado indebidamente no enrola host.
 - Snapshot sin credencial valida responde 401 sin filtrar datos.
-- Pull exitoso muestra datos reales; tres fallos programados y el deadline del tercer
+- Pull exitoso muestra datos reales; tres fallos operativos programados y el deadline del tercer
   slot fallido muestran unreachable.
+- Payload invalido cierra/reprograma el slot, pero no incrementa fallos consecutivos ni
+  cambia estado/version/timestamps actuales, snapshot o filesystems.
 - Ultimo valor stale aparece advertido, no como actual.
 - Agente funciona sin root en distribucion Linux objetivo.
 - Payload malicioso o excesivo se rechaza sin afectar scheduler.
