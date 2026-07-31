@@ -1,9 +1,10 @@
 # Atalaya
 
 Atalaya es un dashboard personal para observar hosts Linux y servicios self-hosted
-dentro de una red Tailscale. Tras completar persistencia y autenticacion, la Fase 2A
-agrega el agente local de Oracle, scheduling persistente y vistas read-only de estado
-actual. El alcance exacto de cada slice permanece definido por la documentacion.
+dentro de una red Tailscale. Tras completar persistencia y autenticacion, la Fase 2
+agrega el agente local de Oracle, enrolamiento remoto, scheduling persistente y vistas
+de estado actual/gestion. El alcance exacto de cada slice permanece definido por la
+documentacion.
 
 El producto completo sigue el contrato de [`spec.md`](spec.md). El indice y la
 precedencia de decisiones tecnicas estan en [`docs/README.md`](docs/README.md).
@@ -129,6 +130,20 @@ HTTP si tambien es loopback. `public_url` representa un origen estricto: no admi
 usuario, path, delimitadores de query o fragmento aunque esten vacios, ni puerto
 explicito vacio. Los errores de parseo no reproducen el valor recibido.
 
+### Enrolar un agente remoto
+
+Desde la UI autenticada, crea un token en Gestionar y guárdalo temporalmente en un
+archivo modo `0600`. En el host remoto, con un `agent.yaml` válido, ejecuta:
+
+```bash
+atalaya agent enroll --config /etc/atalaya/agent.yaml --token-file /run/user/$(id -u)/atalaya-token
+```
+
+El archivo se elimina después de leerlo. Sin `--token-file`, el comando solicita el
+token por prompt. El enrolamiento guarda un estado lateral 0600 para repetir de forma
+segura una respuesta perdida y escribe la credencial sin reemplazar una credencial
+válida existente.
+
 ## Pruebas end-to-end
 
 Instala primero las dependencias fijadas y Chromium, y luego ejecuta el flujo:
@@ -144,7 +159,7 @@ o falta `node_modules`. Playwright siempre arranca el binario Go host recien con
 desde `build/atalaya`; no reutiliza otro servidor ni usa Vite Preview. Cada ejecucion
 crea config, clave `0600` y DB aisladas bajo `build/e2e`.
 
-## CLI implementada hasta Fase 2A
+## CLI implementada hasta Fase 2B
 
 `atalaya version` y las ayudas terminan con codigo `0`. Errores operativos y los
 comandos reservados `backup` y `verify` terminan con `1`. Tambien usan `1` una
@@ -160,6 +175,7 @@ atalaya migrate [--config <path>]
 atalaya admin create [--config <path>] [--username <name>]
 atalaya admin reset-password [--config <path>]
 atalaya agent --config <path>
+atalaya agent enroll --config <path> [--display-name <name>] [--token-file <path>]
 atalaya bootstrap local-agent --server-config <path> --agent-config <path> \
   --agent-url <url> [--display-name <name>] [--listen <addr>] \
   [--credential-path <path>]
@@ -171,7 +187,6 @@ Bootstrap exige `--server-config`, `--agent-config` y `--agent-url`; si se omite
 flags opcionales usa display name `Oracle`, listener `127.0.0.1:9474` y credential path
 junto al agent config. No existen overrides por variables de entorno.
 
-El agente local y sus vistas read-only pertenecen a Fase 2A. Enrolamiento remoto y
-gestion de hosts/filesystems llegan en Fase 2B. Consulta el
-[plan de implementacion](docs/implementation-plan.md) para el alcance y las condiciones
-de salida.
+La UI autenticada permite gestionar tokens, cadencias, estado administrativo y
+filesystems de hosts. Consulta el [plan de implementacion](docs/implementation-plan.md)
+para el alcance y las condiciones de salida.

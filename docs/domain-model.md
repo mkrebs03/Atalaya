@@ -78,11 +78,13 @@ observado es siempre `unknown`, nunca `healthy`.
 
 ### EnrollmentToken
 
-- Hash del token, etiqueta opcional, expiracion y creador.
-- Un unico uso exitoso y fecha de revocacion.
+- Hash SHA-256 del token, etiqueta opcional, expiracion fija de 15 minutos y creador.
+- Un unico uso exitoso y fecha de revocacion; revocar no revela ni reconstituye el
+  secreto.
 - `request_id`, hash del payload, `consumed_at`, `replay_until` y host enrolado para
   idempotencia. El replay exacto recupera la credencial cifrada del host durante esa
-  ventana, sin crear otro host ni otra credencial.
+  ventana de 15 minutos, sin crear otro host ni otra credencial. Un replay con campos
+  distintos es conflicto, incluso si conserva el mismo `request_id`.
 
 Token en claro se muestra una vez y nunca se persiste.
 

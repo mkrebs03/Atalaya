@@ -158,6 +158,33 @@ Condiciones de salida de 2A:
 
 Completa tokens, enrolamiento de segundo host y mutaciones de hosts/filesystems.
 
+Trabajo:
+
+- Crear tokens base64url de 32 bytes, persistir solo su hash y mostrarlos una vez en
+  la UI; listar metadatos y revocar con versionado.
+- Implementar `POST /api/v1/agent-enrollments` con TTL de 15 minutos, replay exacto
+  de 15 minutos, request ID persistido en el agente y credencial 0600.
+- Implementar `atalaya agent enroll --config <path>` con prompt o archivo temporal
+  0600; el token no entra por argumentos ni variables de entorno.
+- Gestionar nombre, intervalo 15..3600, timeout 1..60, activar/desactivar,
+  archivar/restaurar y selección de filesystems mediante CSRF e `If-Match`.
+- Exponer una vista administrativa que distinga hosts archivados y estados de token,
+  y documentar los campos de cadencia/archivado en el contrato de hosts.
+
+Condiciones de salida de 2B:
+
+- Reintentar una respuesta perdida no crea un segundo host ni rota la credencial; un
+  replay alterado, expirado o revocado falla sin filtrar secretos.
+- El servidor nunca persiste el token en claro; el agente y la UI no lo guardan en
+  almacenamiento del navegador, logs, argv ni entorno.
+- Toda mutación existente sin ETag responde 428 y con ETag obsoleto responde 412;
+  sin CSRF responde 403.
+- Cambiar una cadencia cierra el periodo anterior y ancla uno nuevo sin modificar
+  slots históricos; desactivar o archivar cancela la programación.
+- Restaurar deja el host desactivado; habilitarlo después requiere una acción
+  explícita y los hosts archivados no aparecen en listas por defecto.
+- `make lint`, `make test`, `make build` y `make test-e2e` pasan.
+
 ### Alcance acumulado de Fase 2, completado despues de 2B
 
 Trabajo acumulado (2A + 2B):

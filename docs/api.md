@@ -128,11 +128,12 @@ Respuesta exitosa mostrada una vez al agente:
 }
 ```
 
-Repetir mismo `request_id` y token dentro de ventana devuelve mismo resultado de forma
-segura. Ventana dura 15 minutos desde primer consumo, aunque expiracion original ocurra
-antes. Despues, replay responde conflicto de token consumido. Implementacion debe
-limitar intentos y tamano de request. El replay solo devuelve la misma credencial si
-coinciden token, `request_id` y hash del payload completo.
+El token es base64url sin padding de 32 bytes, expira en 15 minutos y solo se puede
+consumir una vez. Repetir exactamente el mismo token, `request_id` y payload dentro de
+la ventana de replay devuelve el mismo resultado. La ventana dura 15 minutos desde el
+primer consumo, aunque la expiracion original ocurra antes. Despues, el replay responde
+conflicto de token consumido. El request esta limitado a 4 KiB y `agent_url` debe ser
+`https://<fqdn>.ts.net:9474`.
 
 ## 3. Auth y sesion
 
@@ -178,8 +179,8 @@ enrolamiento usan `revoked_at` y no el ciclo de archivado.
 - `GET /api/v1/enrollment-tokens`
 - `DELETE /api/v1/enrollment-tokens/{id}`
 
-Fase 2A implementa solo los tres endpoints read-only siguientes; enrolamiento y
-mutaciones quedan en Fase 2B. Todos exigen sesion. `limit` tiene default 50 y maximo
+Fase 2A implementa los endpoints read-only; Fase 2B agrega enrolamiento y mutaciones.
+Todos exigen sesion salvo el endpoint de enrolamiento. `limit` tiene default 50 y maximo
 100; `cursor` es opaco. Limit/cursor invalido responde 400
 `validation_failed` con `fields`, sesion ausente o invalida responde 401
 `authentication_required`, y host ausente, oculto o con bootstrap incompleto responde
@@ -200,10 +201,12 @@ primera pagina para obtener una vista nueva.
     "administrative_state": "pending", "observed_state": "unknown", "stale": false,
     "last_attempt_at": null, "last_success_received_at": null,
     "freshness_deadline_at": null, "consecutive_failures": 0,
+    "interval_seconds": 60, "timeout_seconds": 10,
     "cpu_used_percent": null, "memory_used_bytes": null,
     "memory_total_bytes": null, "uptime_seconds": null,
     "tailscale": null, "warnings": [], "agent_version": null,
     "protocol_version": null, "most_constrained_filesystem": null,
+    "archived": false,
     "version": 1
   }],
   "next_cursor": null
@@ -234,11 +237,12 @@ si coincide responde 304 sin body y conserva `no-store`.
   "last_attempt_at":"2026-07-17T12:00:00Z",
   "last_success_received_at":"2026-07-17T12:00:00Z",
   "freshness_deadline_at":"2026-07-17T12:01:20Z", "consecutive_failures":0,
+  "interval_seconds":60, "timeout_seconds":10,
   "cpu_used_percent":12.5, "memory_used_bytes":1024, "memory_total_bytes":4096,
   "uptime_seconds":12345,
   "tailscale":{"state":"connected","hostname":"oracle-vm.tailnet.ts.net","addresses":["100.64.0.1"]},
   "warnings":["clock_skew"], "agent_version":"dev", "protocol_version":1,
-  "most_constrained_filesystem":null,
+  "most_constrained_filesystem":null, "archived":false,
   "agent_url":"https://oracle-vm.tailnet.ts.net:9474",
   "snapshot":{
     "received_at":"2026-07-17T12:00:00Z", "observed_at":"2026-07-17T11:50:00Z",
@@ -256,6 +260,37 @@ ambos campos de memoria son nullable con las mismas unidades; los dos campos de
 memoria son null como par. `tailscale` siempre es objeto con el mismo enum y
 nullability del wire del agente. `received_at`, `observed_at`, `hostname` y
 `collection_warnings` existen en todo snapshot persistido.
+
+### Gestión de hosts y filesystems
+
+`GET /api/v1/hosts?include_archived=true` incluye recursos archivados para la vista
+administrativa. Esos hosts llevan `archived=true`; el valor por defecto es `false` y
+los mantiene ocultos.
+
+`PATCH /api/v1/hosts/{id}` acepta uno o más campos y exige `If-Match`:
+
+```json
+{"display_name":"media-node","interval_seconds":120,"timeout_seconds":10}
+```
+
+El intervalo está entre 15 y 3600 segundos; el timeout entre 1 y 60 segundos y debe
+ser menor al intervalo. La respuesta devuelve el detalle actualizado y su nuevo ETag.
+`DELETE /api/v1/hosts/{id}` archiva lógicamente; `POST /restore` restaura dejando el
+host desactivado, `POST /enable` lo vuelve a programar y `POST /disable` cancela su
+programación. Todas requieren `If-Match`; archivar responde `204` y las acciones
+restantes devuelven el host actualizado.
+
+`PATCH /api/v1/hosts/{id}/filesystems/{filesystem_id}` acepta
+`{"selected":true|false}`, exige el `If-Match` de la versión del filesystem y
+responde `204`. Todos los endpoints de gestión requieren sesión y CSRF.
+
+### Tokens de enrolamiento
+
+`POST /api/v1/enrollment-tokens` acepta `{"label":"optional label"}` y responde
+`201` con `id`, metadatos, `version` y `token`. El secreto aparece solo en esa
+respuesta y nunca vuelve a aparecer en `GET /api/v1/enrollment-tokens`, que devuelve
+únicamente metadatos. `DELETE /api/v1/enrollment-tokens/{id}` revoca un token y exige
+su ETag; no se puede recuperar el secreto.
 
 `version` incrementa ante cualquier cambio visible del detalle: snapshot/pull,
 filesystems, warnings, estado observado, transicion stale persistida, transicion
