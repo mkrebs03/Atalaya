@@ -299,8 +299,11 @@ func createAtomic(path string, contents []byte, mode os.FileMode, verify func() 
 	if err != nil {
 		return fmt.Errorf("write temporary %s: %w", filepath.Base(path), err)
 	}
-	if err := unix.Renameat2(unix.AT_FDCWD, temporaryPath, unix.AT_FDCWD, path, unix.RENAME_NOREPLACE); err != nil {
-		if errors.Is(err, unix.EEXIST) {
+	// A hard link installs the completed temporary file without replacing an
+	// existing destination. This is portable across the supported Unix hosts;
+	// the temporary file and destination are kept in the same directory.
+	if err := os.Link(temporaryPath, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
 			return verify()
 		}
 		return fmt.Errorf("install %s: %w", filepath.Base(path), err)
