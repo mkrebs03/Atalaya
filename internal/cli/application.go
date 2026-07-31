@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -57,6 +58,7 @@ type Application struct {
 	runAgent          func(context.Context, string, http.Handler) error
 	newCollector      func() agent.Collector
 	runCollection     func(context.Context, collection.Repository) error
+	random            io.Reader
 }
 
 // New creates an application backed by the embedded Vue assets.
@@ -92,6 +94,7 @@ func New(assets fs.FS) (Application, error) {
 			return readTerminalPassword(os.Stdin, output, prompt)
 		},
 		hashPassword: auth.HashPassword,
+		random:       rand.Reader,
 	}, nil
 }
 
@@ -240,6 +243,9 @@ func (application Application) runLocalAgentBootstrap(args []string, stdout, std
 }
 
 func (application Application) runAgentCommand(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "enroll" {
+		return application.runAgentEnrollCommand(args[1:], stdout, stderr)
+	}
 	if containsHelpFlag(args) {
 		writeAgentUsage(stdout)
 		return exitSuccess
@@ -282,6 +288,97 @@ func (application Application) runAgentCommand(args []string, stdout, stderr io.
 		return exitRuntime
 	}
 	return exitSuccess
+}
+
+func (application Application) runAgentEnrollCommand(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) {
+		writeAgentEnrollUsage(stdout)
+		return exitSuccess
+	}
+	flags := flag.NewFlagSet("agent enroll", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", "", "agent YAML configuration path")
+	displayName := flags.String("display-name", "", "host display name")
+	tokenFile := flags.String("token-file", "", "0600 enrollment-token file (default: hidden prompt)")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *configPath == "" {
+		if err != nil {
+			fmt.Fprintf(stderr, "atalaya agent enroll: %v\n", err)
+		} else {
+			fmt.Fprintln(stderr, "atalaya agent enroll: --config is required")
+		}
+		return exitUsage
+	}
+	loaded, err := application.loadAgentConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya agent enroll: %v\n", err)
+		if errors.Is(err, startupconfig.ErrInvalidAgentConfig) {
+			return exitUsage
+		}
+		return exitRuntime
+	}
+	name := *displayName
+	if name == "" {
+		name, err = os.Hostname()
+		if err != nil || name == "" {
+			name = "remote-agent"
+		}
+	}
+	var secret []byte
+	if *tokenFile != "" {
+		secret, err = readEnrollmentTokenFile(*tokenFile)
+		removeErr := os.Remove(*tokenFile)
+		if err == nil && removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = fmt.Errorf("remove enrollment token file: %w", removeErr)
+		}
+	} else {
+		secret, err = application.readPassword("Enrollment token: ", stderr)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya agent enroll: %v\n", err)
+		return exitRuntime
+	}
+	defer clear(secret)
+	if len(secret) == 0 {
+		fmt.Fprintln(stderr, "atalaya agent enroll: enrollment token is required")
+		return exitUsage
+	}
+	if application.random == nil {
+		application.random = rand.Reader
+	}
+	hostID, err := agent.Enroll(context.Background(), agent.EnrollmentOptions{Config: loaded, DisplayName: name, Token: string(secret), Version: application.version, Random: application.random})
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya agent enroll: %v\n", err)
+		return exitRuntime
+	}
+	fmt.Fprintf(stdout, "agent enrolled: %s\n", hostID)
+	return exitSuccess
+}
+
+func readEnrollmentTokenFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open enrollment token file: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		return nil, fmt.Errorf("enrollment token file must be a regular file with mode 0600")
+	}
+	value, err := io.ReadAll(io.LimitReader(file, 128))
+	if err != nil {
+		return nil, err
+	}
+	if len(value) == 44 && value[43] == '\n' {
+		value = value[:43]
+	}
+	if len(value) != 43 {
+		clear(value)
+		return nil, fmt.Errorf("enrollment token file has invalid encoding")
+	}
+	return value, nil
 }
 
 func (application Application) runVersion(args []string, stdout, stderr io.Writer) int {

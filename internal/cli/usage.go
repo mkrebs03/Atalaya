@@ -41,7 +41,11 @@ Options:
 }
 
 func writeAgentUsage(output io.Writer) {
-	fmt.Fprint(output, "Usage: atalaya agent --config <path>\n\nOptions:\n  --config <path>  Agent YAML configuration (required)\n")
+	fmt.Fprint(output, "Usage: atalaya agent <command> [options]\n\nCommands:\n  enroll  Enroll this agent with the server\n\nStart: atalaya agent --config <path>\n")
+}
+
+func writeAgentEnrollUsage(output io.Writer) {
+	fmt.Fprint(output, "Usage: atalaya agent enroll --config <path> [options]\n\nOptions:\n  --config <path>       Agent YAML configuration (required)\n  --display-name <name> Host display name (default local hostname)\n  --token-file <path>   0600 token file (default hidden prompt)\n")
 }
 
 func writeServerUsage(output io.Writer) {
