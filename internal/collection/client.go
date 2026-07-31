@@ -87,6 +87,9 @@ func (c *Client) Pull(ctx context.Context, claim Claim) (agent.Snapshot, error) 
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return agent.Snapshot{}, &PullError{Kind: FailureAuth}
 	}
+	if response.StatusCode >= http.StatusInternalServerError {
+		return agent.Snapshot{}, &PullError{Kind: FailureConnect}
+	}
 	if response.StatusCode != http.StatusOK {
 		return agent.Snapshot{}, &PullError{Kind: FailureProtocol}
 	}

@@ -102,7 +102,9 @@ func TestClientClassifiesAuthTimeoutPayloadAndProtocol(t *testing.T) {
 		_, _ = w.Write([]byte(strings.Repeat("x", MaxPayloadBytes+1)))
 	}, FailurePayload, time.Second}, {"protocol", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"protocol_version":1,"unknown":true}`))
-	}, FailureProtocol, time.Second}}
+	}, FailureProtocol, time.Second}, {"proxy-unavailable", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}, FailureConnect, time.Second}}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {
 			server, roots := newAgentTLSServer(t, "oracle.example.ts.net", item.handler)
