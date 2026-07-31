@@ -7,7 +7,17 @@ defineProps<{
   filesystems: readonly DeepReadonly<Filesystem>[]
   loading: boolean
   error: boolean
+  editable?: boolean
+  busyId?: string
 }>()
+
+const emit = defineEmits<{
+  select: [filesystem: Filesystem, selected: boolean]
+}>()
+
+function onSelectionChange(filesystem: Filesystem, event: Event) {
+  emit('select', filesystem, (event.target as HTMLInputElement).checked)
+}
 </script>
 
 <template>
@@ -32,6 +42,7 @@ defineProps<{
             <th>Montaje</th>
             <th>Tipo</th>
             <th>Estado</th>
+            <th v-if="editable">Vigilar</th>
             <th>Uso</th>
             <th>Disponible</th>
           </tr>
@@ -44,6 +55,17 @@ defineProps<{
             </th>
             <td>{{ filesystem.fs_type }}</td>
             <td>{{ filesystem.present ? 'Presente' : 'Ausente' }}</td>
+            <td v-if="editable">
+              <label class="filesystems__selection">
+                <input
+                  type="checkbox"
+                  :checked="filesystem.selected"
+                  :disabled="busyId === filesystem.id || !filesystem.present"
+                  @change="onSelectionChange(filesystem, $event)"
+                />
+                <span>{{ busyId === filesystem.id ? 'Guardando…' : 'Seleccionado' }}</span>
+              </label>
+            </td>
             <td>
               {{
                 filesystem.used_bytes !== null && filesystem.total_bytes
@@ -106,5 +128,17 @@ defineProps<{
   margin-top: 0.3rem;
   color: var(--ink-muted);
   font-weight: 400;
+}
+.filesystems__selection {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink);
+  font: 800 0.62rem var(--font-mono);
+  white-space: nowrap;
+}
+.filesystems__selection input {
+  min-height: 1rem;
+  accent-color: var(--accent-text);
 }
 </style>

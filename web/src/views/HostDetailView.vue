@@ -1,20 +1,25 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import HostCurrentMetrics from '@/components/hosts/HostCurrentMetrics.vue'
 import FilesystemList from '@/components/hosts/FilesystemList.vue'
 import { useHostPolling } from '@/composables/useHostPolling'
 import { getHost, listAllFilesystems, type Filesystem, type HostDetail } from '@/hosts/api'
 import { formatDate } from '@/hosts/format'
+import { authKey } from '@/auth/useAuth'
+import { selectFilesystem } from '@/hosts/management'
 
 interface DetailState {
   host: HostDetail
   filesystems: Filesystem[]
 }
 const route = useRoute()
+const auth = inject(authKey, null)
 const hostId = computed(() => String(route.params.id))
 let etag: string | undefined
 let currentHost: HostDetail | null = null
+const filesystemBusy = ref('')
+const managementError = ref('')
 
 const polling = useHostPolling<DetailState>(async (signal) => {
   const detail = await getHost(hostId.value, signal, etag)
@@ -30,6 +35,21 @@ watch(hostId, () => {
   currentHost = null
   polling.restart(true)
 })
+
+async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
+  const state = polling.data.value
+  if (!auth || !state) return
+  filesystemBusy.value = filesystem.id
+  managementError.value = ''
+  try {
+    await selectFilesystem(auth.mutate, state.host, filesystem, selected)
+    polling.restart()
+  } catch {
+    managementError.value = 'No se pudo actualizar la selección de almacenamiento.'
+  } finally {
+    filesystemBusy.value = ''
+  }
+}
 </script>
 
 <template>
@@ -73,12 +93,16 @@ watch(hostId, () => {
         <p v-if="polling.error.value" class="host-detail__notice" role="alert">
           La actualización falló; se conserva la lectura anterior.
         </p>
+        <p v-if="managementError" class="host-detail__notice" role="alert">{{ managementError }}</p>
       </header>
       <HostCurrentMetrics :host="polling.data.value.host" />
       <FilesystemList
         :filesystems="polling.data.value.filesystems"
         :loading="false"
         :error="false"
+        :editable="auth !== null"
+        :busy-id="filesystemBusy"
+        @select="updateFilesystem"
       />
     </template>
   </main>

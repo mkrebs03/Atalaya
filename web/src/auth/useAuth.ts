@@ -86,6 +86,7 @@ export function createAuthContext(client: AuthAPI = createAuthAPI()) {
     signIn,
     signOut,
     updatePassword,
+    mutate: client.mutate,
     clear,
     setLoginRedirect(handler: () => void) {
       redirectToLogin = handler

@@ -56,6 +56,14 @@ export function createAuthAPI() {
     return csrf
   }
 
+  async function mutate<T>(path: string, init: RequestInit = {}) {
+    const token = await csrfToken()
+    return request<T>(path, {
+      ...init,
+      headers: { ...init.headers, 'X-CSRF-Token': token },
+    })
+  }
+
   return {
     setAuthFailureHandler(handler: AuthFailureHandler) {
       authFailureHandler = handler
@@ -80,21 +88,21 @@ export function createAuthAPI() {
       )
     },
     async logout() {
-      const token = await csrfToken()
-      return request<void>('/api/v1/auth/logout', {
+      return mutate<void>('/api/v1/auth/logout', {
         method: 'POST',
-        headers: { 'X-CSRF-Token': token },
       })
     },
     async changePassword(currentPassword: string, newPassword: string) {
-      const token = await csrfToken()
-      const session = await request<SessionResponse>('/api/v1/auth/change-password', {
+      const session = await mutate<SessionResponse>('/api/v1/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
       })
       csrf = null
       return session
+    },
+    mutate<T>(path: string, init: RequestInit = {}) {
+      return mutate<T>(path, init)
     },
   }
 }

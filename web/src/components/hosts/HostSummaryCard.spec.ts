@@ -15,6 +15,8 @@ function host(state: ObservedState, stale = false): HostSummary {
     last_success_received_at: null,
     freshness_deadline_at: null,
     consecutive_failures: 0,
+    interval_seconds: 60,
+    timeout_seconds: 10,
     cpu_used_percent: null,
     memory_used_bytes: null,
     memory_total_bytes: null,
@@ -24,6 +26,7 @@ function host(state: ObservedState, stale = false): HostSummary {
     agent_version: null,
     protocol_version: null,
     most_constrained_filesystem: null,
+    archived: false,
     version: 1,
   }
 }

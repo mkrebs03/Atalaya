@@ -4,6 +4,7 @@ import AuthenticatedLayout from '@/layouts/AuthenticatedLayout.vue'
 import AccountView from '@/views/AccountView.vue'
 import HomeView from '@/views/HomeView.vue'
 import HostDetailView from '@/views/HostDetailView.vue'
+import HostManagementView from '@/views/HostManagementView.vue'
 import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
 
@@ -16,6 +17,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', name: 'home', component: HomeView },
       { path: 'hosts/:id', name: 'host-detail', component: HostDetailView },
+      { path: 'manage', name: 'host-management', component: HostManagementView },
       { path: 'account', name: 'account', component: AccountView },
       { path: ':pathMatch(.*)*', name: 'not-found', component: NotFoundView },
     ],

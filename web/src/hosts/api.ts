@@ -27,6 +27,8 @@ export interface HostSummary {
   last_success_received_at: string | null
   freshness_deadline_at: string | null
   consecutive_failures: number
+  interval_seconds: number
+  timeout_seconds: number
   cpu_used_percent: number | null
   memory_used_bytes: number | null
   memory_total_bytes: number | null
@@ -36,6 +38,7 @@ export interface HostSummary {
   agent_version: string | null
   protocol_version: number | null
   most_constrained_filesystem: ConstrainedFilesystem | null
+  archived: boolean
   version: number
 }
 
@@ -79,9 +82,10 @@ interface Page<T> {
   next_cursor: string | null
 }
 
-export function listHosts(signal?: AbortSignal, cursor?: string) {
+export function listHosts(signal?: AbortSignal, cursor?: string, includeArchived = false) {
   const query = new URLSearchParams({ limit: '100' })
   if (cursor) query.set('cursor', cursor)
+  if (includeArchived) query.set('include_archived', 'true')
   return getJSON<Page<HostSummary>>(`/api/v1/hosts?${query}`, { signal })
 }
 
@@ -112,6 +116,10 @@ async function collectPages<T>(load: (cursor?: string) => Promise<{ data: Page<T
 
 export function listAllHosts(signal?: AbortSignal) {
   return collectPages((cursor) => listHosts(signal, cursor))
+}
+
+export function listAllHostsIncludingArchived(signal?: AbortSignal) {
+  return collectPages((cursor) => listHosts(signal, cursor, true))
 }
 
 export function listAllFilesystems(id: string, signal?: AbortSignal) {
