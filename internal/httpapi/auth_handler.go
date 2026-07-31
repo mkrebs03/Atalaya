@@ -20,6 +20,7 @@ import (
 	"github.com/mkrebs03/atalaya/internal/auth"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	"github.com/mkrebs03/atalaya/internal/hostquery"
+	"github.com/mkrebs03/atalaya/internal/hosts"
 )
 
 const sessionCookie = "atalaya_session"
@@ -40,9 +41,10 @@ type AuthConfig struct {
 }
 
 type authAPI struct {
-	service *auth.Service
-	config  AuthConfig
-	hosts   hostquery.Repository
+	service    *auth.Service
+	config     AuthConfig
+	hosts      hostquery.Repository
+	management hosts.ManagementRepository
 }
 
 func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, hostRepositories ...hostquery.Repository) (http.Handler, error) {
@@ -74,8 +76,15 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 	api := &authAPI{service: service, config: config}
 	if len(hostRepositories) == 1 {
 		api.hosts = hostRepositories[0]
+		if management, ok := hostRepositories[0].(hosts.ManagementRepository); ok {
+			api.management = management
+		}
 	}
 	mux := http.NewServeMux()
+	if api.management != nil {
+		mux.HandleFunc("POST /api/v1/agent-enrollments", api.enrollAgent)
+		mux.HandleFunc("/api/v1/agent-enrollments", api.methodNotAllowed)
+	}
 	mux.HandleFunc("POST /api/v1/auth/login", api.login)
 	mux.HandleFunc("/api/v1/auth/login", api.methodNotAllowed)
 	mux.HandleFunc("GET /api/v1/auth/me", api.me)
@@ -92,10 +101,25 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		mux.HandleFunc("/api/v1/hosts", api.methodNotAllowed)
 		mux.HandleFunc("GET /api/v1/hosts/{id}", api.getHost)
 		mux.HandleFunc("GET /api/v1/hosts/{id}/filesystems", api.listFilesystems)
+		if api.management != nil {
+			mux.HandleFunc("PATCH /api/v1/hosts/{id}", api.patchHost)
+			mux.HandleFunc("DELETE /api/v1/hosts/{id}", api.archiveHost)
+			mux.HandleFunc("POST /api/v1/hosts/{id}/enable", api.enableHost)
+			mux.HandleFunc("POST /api/v1/hosts/{id}/disable", api.disableHost)
+			mux.HandleFunc("POST /api/v1/hosts/{id}/restore", api.restoreHost)
+			mux.HandleFunc("PATCH /api/v1/hosts/{id}/filesystems/{filesystem_id}", api.selectFilesystem)
+		}
 		mux.HandleFunc("HEAD /api/v1/hosts/{id}", api.hostsMethodNotAllowed)
 		mux.HandleFunc("HEAD /api/v1/hosts/{id}/filesystems", api.hostsMethodNotAllowed)
 		mux.HandleFunc("/api/v1/hosts/{id}", api.methodNotAllowed)
 		mux.HandleFunc("/api/v1/hosts/{id}/filesystems", api.methodNotAllowed)
+	}
+	if api.management != nil {
+		mux.HandleFunc("POST /api/v1/enrollment-tokens", api.createEnrollmentToken)
+		mux.HandleFunc("GET /api/v1/enrollment-tokens", api.listEnrollmentTokens)
+		mux.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", api.revokeEnrollmentToken)
+		mux.HandleFunc("/api/v1/enrollment-tokens", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/enrollment-tokens/{id}", api.methodNotAllowed)
 	}
 	mux.HandleFunc("/api", api.notFound)
 	mux.HandleFunc("/api/", api.notFound)

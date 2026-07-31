@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -97,7 +98,8 @@ func TestPreflightClassifiesForeignCorruptAndFuture(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "future.db")
 		database := openTestDatabase(t, path)
 		if _, err := database.sql.Exec(
-			"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (4, ?, ?)",
+			"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (?, ?, ?)",
+			len(embeddedMigrations)+1,
 			"future", testInstant.Format("2006-01-02T15:04:05Z07:00"),
 		); err != nil {
 			t.Fatal(err)
@@ -108,13 +110,13 @@ func TestPreflightClassifiesForeignCorruptAndFuture(t *testing.T) {
 	t.Run("future without prior versions", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "future-only.db")
 		raw := openRawDatabase(t, path)
-		if _, err := raw.Exec(`
+		if _, err := raw.Exec(fmt.Sprintf(`
 			CREATE TABLE schema_migrations (
 				version INTEGER PRIMARY KEY,
 				checksum TEXT NOT NULL,
 				applied_at TEXT NOT NULL
 			);
-			INSERT INTO schema_migrations VALUES (4, 'future', '2026-07-16T12:09:10Z')`); err != nil {
+				INSERT INTO schema_migrations VALUES (%d, 'future', '2026-07-16T12:09:10Z')`, len(embeddedMigrations)+1)); err != nil {
 			t.Fatal(err)
 		}
 		raw.Close()

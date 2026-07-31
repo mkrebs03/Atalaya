@@ -13,19 +13,32 @@ import (
 var _ hostquery.Repository = (*Database)(nil)
 
 const hostProjection = `SELECT h.id,h.display_name,h.administrative_state,h.observed_state,h.stale,
-	h.last_attempt_at,h.last_success_received_at,h.freshness_deadline_at,h.consecutive_failures,h.version,h.agent_url,
+	h.last_attempt_at,h.last_success_received_at,h.freshness_deadline_at,h.consecutive_failures,h.interval_seconds,h.timeout_seconds,h.archived_at,h.version,h.agent_url,
 	s.received_at,s.observed_at,s.hostname,s.boot_id,s.uptime_seconds,s.cpu_used_percent,s.memory_used_bytes,s.memory_total_bytes,
 	s.tailscale_state,s.tailscale_hostname,s.agent_version,s.protocol_version
 	FROM hosts h LEFT JOIN host_snapshots s ON s.host_id=h.id`
 
 func (database *Database) ListHosts(ctx context.Context, limit int, cursor *hostquery.HostCursor) ([]hostquery.HostSummary, error) {
+	return database.listHosts(ctx, limit, cursor, false)
+}
+
+// ListHostsIncludingArchived is used by the administrative UI. The public
+// summary deliberately keeps archived resources hidden by default.
+func (database *Database) ListHostsIncludingArchived(ctx context.Context, limit int, cursor *hostquery.HostCursor) ([]hostquery.HostSummary, error) {
+	return database.listHosts(ctx, limit, cursor, true)
+}
+
+func (database *Database) listHosts(ctx context.Context, limit int, cursor *hostquery.HostCursor, includeArchived bool) ([]hostquery.HostSummary, error) {
 	tx, err := database.sql.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("begin host list snapshot: %w", err)
 	}
 	defer tx.Rollback()
 	args := []any{}
-	where := ` WHERE h.archived_at IS NULL AND h.bootstrap_completed_at IS NOT NULL`
+	where := ` WHERE h.bootstrap_completed_at IS NOT NULL`
+	if !includeArchived {
+		where += ` AND h.archived_at IS NULL`
+	}
 	if cursor != nil {
 		where += ` AND (lower(h.display_name)>? OR (lower(h.display_name)=? AND h.id>?))`
 		args = append(args, cursor.Name, cursor.Name, cursor.ID)
@@ -94,16 +107,17 @@ func (database *Database) GetHost(ctx context.Context, id string) (hostquery.Hos
 func scanHostBase(row scanner) (hostquery.HostDetail, error) {
 	var d hostquery.HostDetail
 	var stale int
-	var lastAttempt, lastSuccess, freshness, received, observed, hostname, bootID, tsState, tsHostname, agentVersion sql.NullString
+	var lastAttempt, lastSuccess, freshness, archived, received, observed, hostname, bootID, tsState, tsHostname, agentVersion sql.NullString
 	var uptime, memUsed, memTotal, protocol sql.NullInt64
 	var cpu sql.NullFloat64
-	if err := row.Scan(&d.ID, &d.DisplayName, &d.AdministrativeState, &d.ObservedState, &stale, &lastAttempt, &lastSuccess, &freshness, &d.ConsecutiveFailures, &d.Version, &d.AgentURL, &received, &observed, &hostname, &bootID, &uptime, &cpu, &memUsed, &memTotal, &tsState, &tsHostname, &agentVersion, &protocol); err != nil {
+	if err := row.Scan(&d.ID, &d.DisplayName, &d.AdministrativeState, &d.ObservedState, &stale, &lastAttempt, &lastSuccess, &freshness, &d.ConsecutiveFailures, &d.IntervalSeconds, &d.TimeoutSeconds, &archived, &d.Version, &d.AgentURL, &received, &observed, &hostname, &bootID, &uptime, &cpu, &memUsed, &memTotal, &tsState, &tsHostname, &agentVersion, &protocol); err != nil {
 		return d, err
 	}
 	d.Stale = stale != 0
 	d.LastAttemptAt = stringPointer(lastAttempt)
 	d.LastSuccessReceivedAt = stringPointer(lastSuccess)
 	d.FreshnessDeadlineAt = stringPointer(freshness)
+	d.Archived = archived.Valid
 	d.UptimeSeconds = intPointer(uptime)
 	d.CPUUsedPercent = floatPointer(cpu)
 	d.MemoryUsedBytes = intPointer(memUsed)

@@ -41,6 +41,8 @@ type HostSummary struct {
 	LastSuccessReceivedAt     *string                `json:"last_success_received_at"`
 	FreshnessDeadlineAt       *string                `json:"freshness_deadline_at"`
 	ConsecutiveFailures       int64                  `json:"consecutive_failures"`
+	IntervalSeconds           int64                  `json:"interval_seconds"`
+	TimeoutSeconds            int64                  `json:"timeout_seconds"`
 	CPUUsedPercent            *float64               `json:"cpu_used_percent"`
 	MemoryUsedBytes           *int64                 `json:"memory_used_bytes"`
 	MemoryTotalBytes          *int64                 `json:"memory_total_bytes"`
@@ -50,6 +52,7 @@ type HostSummary struct {
 	AgentVersion              *string                `json:"agent_version"`
 	ProtocolVersion           *int64                 `json:"protocol_version"`
 	MostConstrainedFilesystem *ConstrainedFilesystem `json:"most_constrained_filesystem"`
+	Archived                  bool                   `json:"archived"`
 	Version                   int64                  `json:"version"`
 }
 

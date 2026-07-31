@@ -111,6 +111,30 @@ func validateSchemaV3(ctx context.Context, query queryer) error {
 	return validateMigrationObjects(ctx, query, hostMigrationSQL)
 }
 
+func validateSchemaV4(ctx context.Context, query queryer) error {
+	if err := validateSchemaV3(ctx, query); err != nil {
+		return err
+	}
+	if err := validateTable(ctx, query, "enrollment_tokens", []expectedColumn{
+		{"id", "TEXT", true, 1},
+		{"token_hash", "BLOB", true, 0},
+		{"label", "TEXT", false, 0},
+		{"created_by", "TEXT", true, 0},
+		{"created_at", "TEXT", true, 0},
+		{"expires_at", "TEXT", true, 0},
+		{"revoked_at", "TEXT", false, 0},
+		{"consumed_at", "TEXT", false, 0},
+		{"replay_until", "TEXT", false, 0},
+		{"request_id", "TEXT", false, 0},
+		{"payload_hash", "BLOB", false, 0},
+		{"host_id", "TEXT", false, 0},
+		{"version", "INTEGER", true, 0},
+	}); err != nil {
+		return corruptQueryError(ctx, "invalid enrollment_tokens table", err)
+	}
+	return validateMigrationObjects(ctx, query, enrollmentMigrationSQL)
+}
+
 // validateMigrationObjects compares every explicit CREATE statement with SQLite's
 // normalized schema text. This detects weakened CHECK, FK, partial-index, and unique
 // definitions that column metadata alone cannot see.

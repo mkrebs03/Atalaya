@@ -59,7 +59,7 @@ func TestMigration003UpgradesV2AndValidatesExactSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := Preflight(context.Background(), path, testMasterKey())
-	if err != nil || result.SchemaVersion != 3 {
+	if err != nil || result.SchemaVersion != len(embeddedMigrations) {
 		t.Fatalf("preflight=%+v err=%v", result, err)
 	}
 }

@@ -22,15 +22,22 @@ func (api *authAPI) listHosts(response http.ResponseWriter, request *http.Reques
 	if _, ok := api.authenticate(response, request); !ok {
 		return
 	}
-	limit, cursor, ok := api.pageParameters(response, request)
+	limit, cursor, ok := api.pageParameters(response, request, "include_archived")
 	if !ok {
 		return
 	}
+	includeArchived := request.URL.Query().Get("include_archived") == "true"
 	var after *hostquery.HostCursor
 	if cursor != nil {
 		after = &hostquery.HostCursor{Name: cursor.First, ID: cursor.ID}
 	}
-	items, err := api.hosts.ListHosts(request.Context(), limit+1, after)
+	var items []hostquery.HostSummary
+	var err error
+	if includeArchived && api.management != nil {
+		items, err = api.management.ListHostsIncludingArchived(request.Context(), limit+1, after)
+	} else {
+		items, err = api.hosts.ListHosts(request.Context(), limit+1, after)
+	}
 	if err != nil {
 		api.internal(response, request, err)
 		return
@@ -109,9 +116,13 @@ func (api *authAPI) listFilesystems(response http.ResponseWriter, request *http.
 	}{items, next})
 }
 
-func (api *authAPI) pageParameters(response http.ResponseWriter, request *http.Request) (int, *pageCursor, bool) {
+func (api *authAPI) pageParameters(response http.ResponseWriter, request *http.Request, extras ...string) (int, *pageCursor, bool) {
 	limit := 50
 	fields := map[string]string{}
+	allowed := map[string]bool{}
+	for _, extra := range extras {
+		allowed[extra] = true
+	}
 	if values, exists := request.URL.Query()["limit"]; exists {
 		if len(values) != 1 {
 			fields["limit"] = "must be a single integer between 1 and 100"
@@ -132,8 +143,13 @@ func (api *authAPI) pageParameters(response http.ResponseWriter, request *http.R
 		}
 	}
 	for key := range request.URL.Query() {
-		if key != "limit" && key != "cursor" {
+		if key != "limit" && key != "cursor" && !allowed[key] {
 			fields[key] = "is not supported"
+		}
+	}
+	if allowed["include_archived"] {
+		if values, exists := request.URL.Query()["include_archived"]; exists && (len(values) != 1 || (values[0] != "true" && values[0] != "false")) {
+			fields["include_archived"] = "must be true or false"
 		}
 	}
 	if len(fields) > 0 {

@@ -28,6 +28,7 @@ type schemaValidator func(context.Context, queryer) error
 
 var embeddedMigrations = mustLoadMigrations()
 var hostMigrationSQL = mustReadMigration("migrations/003_hosts.sql")
+var enrollmentMigrationSQL = mustReadMigration("migrations/004_enrollment.sql")
 
 func mustReadMigration(name string) string {
 	contents, err := migrationFiles.ReadFile(name)
@@ -50,6 +51,7 @@ func mustLoadMigrations() []migration {
 		newMigrationWithValidator(1, string(initial), validateSchemaV1),
 		newMigrationWithValidator(2, string(sessions), validateSchemaV2),
 		newMigrationWithValidator(3, hostMigrationSQL, validateSchemaV3),
+		newMigrationWithValidator(4, enrollmentMigrationSQL, validateSchemaV4),
 	}
 }
 

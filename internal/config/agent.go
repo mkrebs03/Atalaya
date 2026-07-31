@@ -103,6 +103,13 @@ func validateAgentURL(raw string) error {
 	return nil
 }
 
+// ValidateAgentURL applies the fixed v1 Tailscale Serve contract to a remote
+// agent URL. It is shared by bootstrap, enrollment, and the server-side
+// enrollment endpoint so those paths cannot drift apart.
+func ValidateAgentURL(raw string) error {
+	return validateAgentURL(raw)
+}
+
 func validDNSName(host string) bool {
 	if len(host) < 1 || len(host) > 253 || host != strings.ToLower(host) {
 		return false

@@ -15,7 +15,7 @@ import (
 func TestFailedMigrationRollsBackOnlyItsTransaction(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "database.db")
 	migrations := append([]migration(nil), embeddedMigrations...)
-	migrations = append(migrations, newMigrationWithValidator(4, `
+	migrations = append(migrations, newMigrationWithValidator(len(embeddedMigrations)+1, `
 		CREATE TABLE must_roll_back (id INTEGER);
 		INSERT INTO table_that_does_not_exist(id) VALUES (1);`, validateSchemaV3))
 
@@ -38,8 +38,8 @@ func TestFailedMigrationRollsBackOnlyItsTransaction(t *testing.T) {
 	).Scan(&rolledBackTable); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 3 || rolledBackTable != 0 {
-		t.Fatalf("after failed v4: migrations = %d, rolled-back table count = %d", migrationCount, rolledBackTable)
+	if migrationCount != len(embeddedMigrations) || rolledBackTable != 0 {
+		t.Fatalf("after failed migration: migrations = %d, rolled-back table count = %d", migrationCount, rolledBackTable)
 	}
 }
 
@@ -277,11 +277,12 @@ func TestValidationRejectsNonContiguousStoredHistory(t *testing.T) {
 	database := openTestDatabase(t, path)
 	extraMigrations := append([]migration(nil), embeddedMigrations...)
 	extraMigrations = append(extraMigrations,
-		newMigrationWithValidator(4, "SELECT 4", validateSchemaV3),
-		newMigrationWithValidator(5, "SELECT 5", validateSchemaV3))
+		newMigrationWithValidator(len(embeddedMigrations)+1, "SELECT 4", validateSchemaV3),
+		newMigrationWithValidator(len(embeddedMigrations)+2, "SELECT 5", validateSchemaV3))
 	if _, err := database.sql.Exec(
-		"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (5, ?, ?)",
-		extraMigrations[4].checksum, testInstant.Format(time.RFC3339Nano),
+		"INSERT INTO schema_migrations(version, checksum, applied_at) VALUES (?, ?, ?)",
+		extraMigrations[len(extraMigrations)-1].version,
+		extraMigrations[len(extraMigrations)-1].checksum, testInstant.Format(time.RFC3339Nano),
 	); err != nil {
 		t.Fatal(err)
 	}
