@@ -23,6 +23,8 @@ var _ hosts.ManagementRepository = (*Database)(nil)
 
 type managementRandom struct{ reader io.Reader }
 
+const maxEnrollmentTokenPageSize = 100
+
 func (r managementRandom) ID() (string, error) { return randomUUIDv4(r.reader) }
 
 func (r managementRandom) Intn(max int) int {
@@ -93,7 +95,8 @@ func (database *Database) CreateEnrollmentToken(ctx context.Context, label, admi
 }
 
 func (database *Database) ListEnrollmentTokens(ctx context.Context, limit int, cursor string) ([]hosts.EnrollmentToken, error) {
-	if limit < 1 || limit > 100 {
+	// The HTTP handler requests one extra row to determine whether a next page exists.
+	if limit < 1 || limit > maxEnrollmentTokenPageSize+1 {
 		return nil, fmt.Errorf("invalid enrollment token limit")
 	}
 	tx, err := database.sql.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

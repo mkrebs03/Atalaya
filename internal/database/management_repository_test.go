@@ -35,6 +35,10 @@ func TestEnrollmentTokenIsHashedAndExactReplayIsIdempotent(t *testing.T) {
 	if bytes.Contains(stored, []byte(secret)) || bytes.Equal(stored, []byte(secret)) {
 		t.Fatal("enrollment token was stored in plaintext")
 	}
+	items, err := database.ListEnrollmentTokens(context.Background(), 101, "")
+	if err != nil || len(items) != 1 || items[0].ID != token.ID {
+		t.Fatalf("lookahead token listing = items=%+v err=%v", items, err)
+	}
 
 	request := hosts.EnrollmentRequest{Token: secret, RequestID: "request-1", DisplayName: "Remote", AgentURL: "https://remote.example.ts.net:9474", AgentVersion: "dev", ProtocolVersion: 1}
 	first, err := database.EnrollAgent(context.Background(), request, testInstant, bytes.NewReader(bytes.Repeat([]byte{8}, 512)))
