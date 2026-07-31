@@ -95,6 +95,18 @@ func TestManagementEndpointsKeepEnrollmentUnauthenticatedAndMutationsCSRFProtect
 		t.Fatalf("created=%d headers=%v body=%s", created.Code, created.Header(), created.Body.String())
 	}
 
+	patch := httptest.NewRequest(http.MethodPatch, "http://127.0.0.1:8080/api/v1/hosts/host-1", strings.NewReader(`{"interval_seconds":75}`))
+	patch.AddCookie(cookie)
+	patch.Header.Set("Origin", "http://127.0.0.1:8080")
+	patch.Header.Set("X-CSRF-Token", csrf)
+	patch.Header.Set("If-Match", `"4"`)
+	patch.Header.Set("Content-Type", "application/json")
+	patched := httptest.NewRecorder()
+	handler.ServeHTTP(patched, patch)
+	if patched.Code != http.StatusOK || !strings.Contains(patched.Body.String(), `"id":"host-1"`) {
+		t.Fatalf("patch=%d %s", patched.Code, patched.Body.String())
+	}
+
 	missingVersion := httptest.NewRequest(http.MethodPatch, "http://127.0.0.1:8080/api/v1/hosts/host-1", strings.NewReader(`{"display_name":"changed"}`))
 	missingVersion.AddCookie(cookie)
 	missingVersion.Header.Set("Origin", "http://127.0.0.1:8080")

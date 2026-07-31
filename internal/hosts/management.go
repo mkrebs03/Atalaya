@@ -60,9 +60,9 @@ type EnrollmentResponse struct {
 }
 
 type HostPatch struct {
-	DisplayName     *string
-	IntervalSeconds *int
-	TimeoutSeconds  *int
+	DisplayName     *string `json:"display_name"`
+	IntervalSeconds *int    `json:"interval_seconds"`
+	TimeoutSeconds  *int    `json:"timeout_seconds"`
 }
 
 type ManagementRepository interface {
