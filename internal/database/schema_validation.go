@@ -206,6 +206,34 @@ func validateSchemaV7(ctx context.Context, query queryer) error {
 	return validateMigrationObjects(ctx, query, checksMigrationSQL)
 }
 
+func validateSchemaV8(ctx context.Context, query queryer) error {
+	if err := validateSchemaV7(ctx, query); err != nil {
+		return err
+	}
+	for _, table := range []struct {
+		name    string
+		columns []expectedColumn
+	}{
+		{"alert_rules", []expectedColumn{
+			{"id", "TEXT", true, 1}, {"name", "TEXT", true, 0}, {"type", "TEXT", true, 0}, {"severity", "TEXT", true, 0},
+			{"host_id", "TEXT", false, 0}, {"check_id", "TEXT", false, 0}, {"filesystem_id", "TEXT", false, 0}, {"check_mode", "TEXT", false, 0},
+			{"for_seconds", "INTEGER", true, 0}, {"consecutive_failures", "INTEGER", false, 0}, {"metric", "TEXT", false, 0}, {"operator", "TEXT", false, 0}, {"threshold", "REAL", false, 0},
+			{"enabled", "INTEGER", true, 0}, {"archived_at", "TEXT", false, 0}, {"created_at", "TEXT", true, 0}, {"updated_at", "TEXT", true, 0}, {"version", "INTEGER", true, 0},
+		}},
+		{"alert_rule_channels", []expectedColumn{{"rule_id", "TEXT", true, 1}, {"channel_id", "TEXT", true, 2}}},
+		{"alert_evaluations", []expectedColumn{{"rule_id", "TEXT", true, 1}, {"state", "TEXT", true, 0}, {"first_true_at", "TEXT", false, 0}, {"last_evaluated_at", "TEXT", false, 0}, {"last_value", "REAL", false, 0}, {"last_condition_status", "TEXT", true, 0}, {"incident_id", "TEXT", false, 0}, {"updated_at", "TEXT", true, 0}}},
+		{"incidents", []expectedColumn{{"id", "TEXT", true, 1}, {"rule_id", "TEXT", true, 0}, {"rule_name", "TEXT", true, 0}, {"rule_type", "TEXT", true, 0}, {"target_id", "TEXT", true, 0}, {"target_name", "TEXT", true, 0}, {"severity", "TEXT", true, 0}, {"state", "TEXT", true, 0}, {"condition_status", "TEXT", true, 0}, {"started_at", "TEXT", true, 0}, {"fired_at", "TEXT", true, 0}, {"resolved_at", "TEXT", false, 0}, {"initial_value", "REAL", false, 0}, {"last_value", "REAL", false, 0}, {"resolution_reason", "TEXT", false, 0}}},
+		{"incident_channel_snapshots", []expectedColumn{{"incident_id", "TEXT", true, 1}, {"channel_id", "TEXT", true, 2}}},
+		{"notification_channels", []expectedColumn{{"id", "TEXT", true, 1}, {"name", "TEXT", true, 0}, {"provider", "TEXT", true, 0}, {"encrypted_config", "BLOB", true, 0}, {"enabled", "INTEGER", true, 0}, {"archived_at", "TEXT", false, 0}, {"last_test_at", "TEXT", false, 0}, {"created_at", "TEXT", true, 0}, {"updated_at", "TEXT", true, 0}, {"version", "INTEGER", true, 0}}},
+		{"notification_deliveries", []expectedColumn{{"id", "TEXT", true, 1}, {"kind", "TEXT", true, 0}, {"channel_id", "TEXT", true, 0}, {"incident_id", "TEXT", false, 0}, {"transition", "TEXT", false, 0}, {"test_request_id", "TEXT", false, 0}, {"payload", "TEXT", true, 0}, {"state", "TEXT", true, 0}, {"attempts", "INTEGER", true, 0}, {"next_attempt_at", "TEXT", true, 0}, {"lease_until", "TEXT", false, 0}, {"last_error_code", "TEXT", false, 0}, {"skipped_reason", "TEXT", false, 0}, {"created_at", "TEXT", true, 0}, {"updated_at", "TEXT", true, 0}, {"delivered_at", "TEXT", false, 0}}},
+	} {
+		if err := validateTable(ctx, query, table.name, table.columns); err != nil {
+			return corruptQueryError(ctx, "invalid "+table.name+" table", err)
+		}
+	}
+	return validateMigrationObjects(ctx, query, alertsNotificationsMigrationSQL)
+}
+
 func validateMetricTables(ctx context.Context, query queryer, extendedProgress bool) error {
 	retentionProgress := []expectedColumn{
 		{"id", "INTEGER", false, 1}, {"last_rollup_bucket_start", "TEXT", false, 0},

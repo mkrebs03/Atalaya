@@ -17,12 +17,14 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/mkrebs03/atalaya/internal/alerts"
 	"github.com/mkrebs03/atalaya/internal/auth"
 	"github.com/mkrebs03/atalaya/internal/checks"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	"github.com/mkrebs03/atalaya/internal/hostquery"
 	"github.com/mkrebs03/atalaya/internal/hosts"
 	"github.com/mkrebs03/atalaya/internal/metrics"
+	"github.com/mkrebs03/atalaya/internal/notifications"
 	settingsdomain "github.com/mkrebs03/atalaya/internal/settings"
 )
 
@@ -44,14 +46,16 @@ type AuthConfig struct {
 }
 
 type authAPI struct {
-	service      *auth.Service
-	config       AuthConfig
-	hosts        hostquery.Repository
-	management   hosts.ManagementRepository
-	metrics      metrics.Repository
-	checks       checks.Repository
-	checkMetrics metrics.CheckRepository
-	settings     settingsdomain.Repository
+	service       *auth.Service
+	config        AuthConfig
+	hosts         hostquery.Repository
+	management    hosts.ManagementRepository
+	metrics       metrics.Repository
+	checks        checks.Repository
+	checkMetrics  metrics.CheckRepository
+	settings      settingsdomain.Repository
+	alerts        alerts.Repository
+	notifications notifications.Repository
 }
 
 func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, hostRepositories ...hostquery.Repository) (http.Handler, error) {
@@ -97,6 +101,12 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		}
 		if repository, ok := hostRepositories[0].(settingsdomain.Repository); ok {
 			api.settings = repository
+		}
+		if repository, ok := hostRepositories[0].(alerts.Repository); ok {
+			api.alerts = repository
+		}
+		if repository, ok := hostRepositories[0].(notifications.Repository); ok {
+			api.notifications = repository
 		}
 	}
 	mux := http.NewServeMux()
@@ -169,6 +179,36 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		if api.checkMetrics != nil {
 			mux.HandleFunc("GET /api/v1/checks/{id}/results", api.getCheckMetrics)
 		}
+	}
+	if api.alerts != nil {
+		mux.HandleFunc("GET /api/v1/alert-rules", api.listAlertRules)
+		mux.HandleFunc("POST /api/v1/alert-rules", api.createAlertRule)
+		mux.HandleFunc("/api/v1/alert-rules", api.methodNotAllowed)
+		mux.HandleFunc("GET /api/v1/alert-rules/{id}", api.getAlertRule)
+		mux.HandleFunc("PATCH /api/v1/alert-rules/{id}", api.patchAlertRule)
+		mux.HandleFunc("DELETE /api/v1/alert-rules/{id}", api.archiveAlertRule)
+		mux.HandleFunc("POST /api/v1/alert-rules/{id}/enable", api.enableAlertRule)
+		mux.HandleFunc("POST /api/v1/alert-rules/{id}/disable", api.disableAlertRule)
+		mux.HandleFunc("POST /api/v1/alert-rules/{id}/restore", api.restoreAlertRule)
+		mux.HandleFunc("GET /api/v1/incidents", api.listIncidents)
+		mux.HandleFunc("GET /api/v1/incidents/{id}", api.getIncident)
+		mux.HandleFunc("/api/v1/incidents", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/incidents/{id}", api.methodNotAllowed)
+	}
+	if api.notifications != nil {
+		mux.HandleFunc("GET /api/v1/notification-channels", api.listNotificationChannels)
+		mux.HandleFunc("POST /api/v1/notification-channels", api.createNotificationChannel)
+		mux.HandleFunc("/api/v1/notification-channels", api.methodNotAllowed)
+		mux.HandleFunc("GET /api/v1/notification-channels/{id}", api.getNotificationChannel)
+		mux.HandleFunc("PATCH /api/v1/notification-channels/{id}", api.patchNotificationChannel)
+		mux.HandleFunc("DELETE /api/v1/notification-channels/{id}", api.archiveNotificationChannel)
+		mux.HandleFunc("POST /api/v1/notification-channels/{id}/restore", api.restoreNotificationChannel)
+		mux.HandleFunc("POST /api/v1/notification-channels/{id}/test", api.testNotificationChannel)
+		mux.HandleFunc("GET /api/v1/notification-deliveries", api.listNotificationDeliveries)
+		mux.HandleFunc("GET /api/v1/notification-deliveries/{id}", api.getNotificationDelivery)
+		mux.HandleFunc("/api/v1/notification-channels/{id}", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/notification-deliveries", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/notification-deliveries/{id}", api.methodNotAllowed)
 	}
 	mux.HandleFunc("/api", api.notFound)
 	mux.HandleFunc("/api/", api.notFound)

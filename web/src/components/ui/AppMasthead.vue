@@ -17,7 +17,7 @@ defineEmits<{
       <RouterLink class="masthead__brand" to="/" aria-label="Atalaya, resumen">
         <AtalayaMark />
       </RouterLink>
-      <p class="masthead__phase">Fase 04 <span>/</span> Checks de servicio</p>
+      <p class="masthead__phase">Fase 05 <span>/</span> Alertas y entregas</p>
       <div class="masthead__session">
         <p class="masthead__user">
           <span class="masthead__signal" aria-hidden="true"></span>
@@ -36,6 +36,8 @@ defineEmits<{
         <RouterLink to="/checks">Checks</RouterLink>
         <RouterLink to="/manage">Gestionar</RouterLink>
         <RouterLink to="/settings">Configurar</RouterLink>
+        <RouterLink to="/alerts">Alertas</RouterLink>
+        <RouterLink to="/notifications">Notificar</RouterLink>
         <RouterLink to="/account">Cuenta</RouterLink>
       </nav>
       <p class="masthead__privacy">Tailnet / privado</p>
@@ -138,6 +140,7 @@ defineEmits<{
 }
 
 .masthead__navigation {
+  min-width: 0;
   justify-self: center;
   align-self: stretch;
   display: flex;
@@ -146,6 +149,7 @@ defineEmits<{
 
 .masthead__navigation a {
   min-width: 7.5rem;
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
   border-inline: 1px solid var(--line-soft);
@@ -156,6 +160,7 @@ defineEmits<{
   letter-spacing: 0.1em;
   text-decoration: none;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .masthead__navigation a + a {
@@ -189,11 +194,15 @@ defineEmits<{
   .masthead__navigation {
     grid-column: 1 / -1;
     justify-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: thin;
   }
 
   .masthead__navigation a {
-    min-width: 0;
-    flex: 1;
+    min-width: max-content;
   }
 }
 

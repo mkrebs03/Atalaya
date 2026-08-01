@@ -281,6 +281,9 @@ func (database *Database) Archive(ctx context.Context, id string, version int64,
 	if err := cancelCheckSchedule(ctx, tx, id, "target_archived", now); err != nil {
 		return err
 	}
+	if err := database.resolveTargetRulesTx(ctx, tx, "check", id, now, "target_archived", alertRandomSource()); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -314,6 +317,9 @@ func (database *Database) SetEnabled(ctx context.Context, id string, version int
 	}
 	if !enabled {
 		if err := cancelCheckSchedule(ctx, tx, id, "target_disabled", now); err != nil {
+			return err
+		}
+		if err := database.resolveTargetRulesTx(ctx, tx, "check", id, now, "target_disabled", random); err != nil {
 			return err
 		}
 	} else if err := createCheckSchedule(ctx, tx, id, current.Config, now.UTC(), random); err != nil {
@@ -562,6 +568,13 @@ func (database *Database) FinishScheduled(ctx context.Context, claim checks.Sche
 				return err
 			}
 		}
+		resolutionReason := reason
+		if archived.Valid {
+			resolutionReason = "target_archived"
+		}
+		if err := database.resolveTargetRulesTx(ctx, tx, "check", claim.CheckID, result.ReceivedAt, resolutionReason, random); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 	nextNominal := claim.NominalAt.Add(claim.Interval)
@@ -582,13 +595,25 @@ func (database *Database) FinishScheduled(ctx context.Context, claim checks.Sche
 	}
 	if terminalState == "failed" {
 		_, err = tx.ExecContext(ctx, "UPDATE service_checks SET last_attempt_at=?,updated_at=?,version=version+1 WHERE id=?", dbTime(result.ReceivedAt), dbTime(result.ReceivedAt), claim.CheckID)
-		return errOrCommit(tx, err)
+		if err != nil {
+			return err
+		}
+		// An internal scheduler failure closes the slot without a result row.
+		// That missing evidence must break pending continuity and make a
+		// firing incident unknown.
+		if err := database.evaluateCheckAlertsTx(ctx, tx, claim.CheckID, "", result.ReceivedAt, random); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO check_results(check_id,slot_id,received_at,status,latency_ms,error_code,http_status) VALUES(?,?,?,?,?,?,?) ON CONFLICT(check_id,slot_id) DO NOTHING`, claim.CheckID, claim.SlotID, dbTime(result.ReceivedAt), result.Status, nullableIntPointer(result.LatencyMS), nullableError(result.ErrorCode), nullableCheckStatus(result.HTTPStatus)); err != nil {
 		return err
 	}
 	freshness := nextNominal.Add(10*time.Second + claim.Timeout)
 	if _, err := tx.ExecContext(ctx, `UPDATE service_checks SET observed_state=?,last_attempt_at=?,last_result_at=?,freshness_deadline_at=?,consecutive_failures=CASE WHEN ?='down' THEN consecutive_failures+1 ELSE 0 END,last_latency_ms=?,last_error_code=?,last_http_status=?,updated_at=?,version=version+1 WHERE id=?`, result.Status, dbTime(result.ReceivedAt), dbTime(result.ReceivedAt), dbTime(freshness), result.Status, nullableIntPointer(result.LatencyMS), nullableError(result.ErrorCode), nullableCheckStatus(result.HTTPStatus), dbTime(result.ReceivedAt), claim.CheckID); err != nil {
+		return err
+	}
+	if err := database.evaluateCheckAlertsTx(ctx, tx, claim.CheckID, string(result.Status), result.ReceivedAt, random); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -684,14 +709,14 @@ func (database *Database) MaintainScheduled(ctx context.Context, now time.Time, 
 		return err
 	}
 	for _, item := range expired {
-		if err := reanchorCheck(ctx, tx, item, now, random); err != nil {
+		if err := database.reanchorCheck(ctx, tx, item, now, random); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func reanchorCheck(ctx context.Context, tx *sql.Tx, item struct {
+func (database *Database) reanchorCheck(ctx context.Context, tx *sql.Tx, item struct {
 	slot, check, period, nominal   string
 	oldInterval, interval, timeout int64
 }, now time.Time, random checks.IDSource) error {
@@ -707,6 +732,11 @@ func reanchorCheck(ctx context.Context, tx *sql.Tx, item struct {
 		end = now
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE schedule_periods SET ends_at=? WHERE id=? AND ends_at IS NULL", dbTime(end), item.period); err != nil {
+		return err
+	}
+	// A missed deadline is an explicit missing slot. Evaluate it before
+	// opening the replacement period so a later failure cannot bridge the gap.
+	if err := database.evaluateCheckAlertsTx(ctx, tx, item.check, "", now, random); err != nil {
 		return err
 	}
 	config, err := readCheckConfig(ctx, tx, item.check)

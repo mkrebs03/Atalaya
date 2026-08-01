@@ -118,6 +118,13 @@ func (database *Database) Finish(ctx context.Context, claim collection.Claim, re
 		if err = closePeriod(ctx, tx, periodID, result.ReceivedAt); err != nil {
 			return err
 		}
+		resolutionReason := "target_disabled"
+		if archived.Valid {
+			resolutionReason = "target_archived"
+		}
+		if err = database.resolveTargetRulesTx(ctx, tx, "host", claim.HostID, result.ReceivedAt, resolutionReason, random); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 	if url != claim.AgentURL || generation != claim.CollectionGeneration {
@@ -125,6 +132,9 @@ func (database *Database) Finish(ctx context.Context, claim collection.Claim, re
 			return err
 		}
 		if err = closePeriod(ctx, tx, periodID, result.ReceivedAt); err != nil {
+			return err
+		}
+		if err = database.resolveTargetRulesTx(ctx, tx, "host", claim.HostID, result.ReceivedAt, "target_changed", random); err != nil {
 			return err
 		}
 		if err = createAnchoredSchedule(ctx, tx, claim.HostID, result.ReceivedAt, interval, timeout, random); err != nil {
@@ -157,6 +167,12 @@ func (database *Database) Finish(ctx context.Context, claim collection.Claim, re
 		if _, err = tx.ExecContext(ctx, `UPDATE hosts SET last_attempt_at=?,consecutive_failures=consecutive_failures+1,observed_state=CASE WHEN observed_state='unreachable' THEN 'unreachable' WHEN last_success_received_at IS NULL THEN 'unknown' ELSE 'degraded' END,updated_at=?,version=version+1 WHERE id=?`, finished, finished, claim.HostID); err != nil {
 			return err
 		}
+		if err = database.evaluateHostAlertsTx(ctx, tx, claim.HostID, hostAlertEvent{OperationalFailure: true}, result.ReceivedAt, random); err != nil {
+			return err
+		}
+		if err = database.evaluateFilesystemAlertsForHostTx(ctx, tx, claim.HostID, hostAlertEvent{OperationalFailure: true}, result.ReceivedAt, random); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 	if err = persistSnapshot(ctx, tx, claim.HostID, *result.Snapshot, result.ReceivedAt, random); err != nil {
@@ -172,6 +188,12 @@ func (database *Database) Finish(ctx context.Context, claim collection.Claim, re
 		observedState = "degraded"
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE hosts SET administrative_state='active',observed_state=?,last_attempt_at=?,last_success_received_at=?,freshness_deadline_at=?,consecutive_failures=0,stale=0,updated_at=?,version=version+1 WHERE id=?`, observedState, finished, finished, dbTime(nextDeadline.Add(5*time.Second)), finished, claim.HostID); err != nil {
+		return err
+	}
+	if err = database.evaluateHostAlertsTx(ctx, tx, claim.HostID, hostAlertEvent{Success: true}, result.ReceivedAt, random); err != nil {
+		return err
+	}
+	if err = database.evaluateFilesystemAlertsForHostTx(ctx, tx, claim.HostID, hostAlertEvent{Success: true}, result.ReceivedAt, random); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -384,8 +406,35 @@ func (database *Database) Maintain(ctx context.Context, now time.Time, random co
 	if _, err = tx.ExecContext(ctx, `UPDATE schedule_slots SET state='scheduled',lease_until=NULL WHERE state='running' AND lease_until<=? AND deadline_at>=? AND process_attempts<2 AND EXISTS(SELECT 1 FROM hosts h WHERE h.id=schedule_slots.target_id AND h.administrative_state IN ('pending','active') AND h.archived_at IS NULL)`, timestamp, timestamp); err != nil {
 		return err
 	}
+	staleRows, err := tx.QueryContext(ctx, `SELECT id FROM hosts WHERE stale=0 AND freshness_deadline_at IS NOT NULL AND freshness_deadline_at<=? AND EXISTS(SELECT 1 FROM host_snapshots x WHERE x.host_id=hosts.id)`, timestamp)
+	if err != nil {
+		return err
+	}
+	var newlyStaleHosts []string
+	for staleRows.Next() {
+		var hostID string
+		if err := staleRows.Scan(&hostID); err != nil {
+			staleRows.Close()
+			return err
+		}
+		newlyStaleHosts = append(newlyStaleHosts, hostID)
+	}
+	if err := staleRows.Close(); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, `UPDATE hosts SET stale=1,updated_at=?,version=version+1 WHERE stale=0 AND freshness_deadline_at IS NOT NULL AND freshness_deadline_at<=? AND EXISTS(SELECT 1 FROM host_snapshots x WHERE x.host_id=hosts.id)`, timestamp, timestamp); err != nil {
 		return err
+	}
+	for _, hostID := range newlyStaleHosts {
+		// A stale pull is missing evidence for threshold rules. Reset pending
+		// continuity and mark firing incidents unknown without treating the
+		// stale value as a fresh observation.
+		if err := database.evaluateHostAlertsTx(ctx, tx, hostID, hostAlertEvent{}, now, random); err != nil {
+			return err
+		}
+		if err := database.evaluateFilesystemAlertsForHostTx(ctx, tx, hostID, hostAlertEvent{}, now, random); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE hosts SET observed_state='unreachable',updated_at=?,version=version+1 WHERE consecutive_failures>=3 AND observed_state!='unreachable' AND (SELECT s.deadline_at FROM schedule_slots s WHERE s.target_id=hosts.id AND s.target_type='host' AND s.state='failed' ORDER BY s.finished_at DESC LIMIT 1)<=?`, timestamp, timestamp); err != nil {
 		return err
@@ -411,7 +460,7 @@ func (database *Database) Maintain(ctx context.Context, now time.Time, random co
 		return err
 	}
 	for _, item := range expiredSlots {
-		if err = reanchor(ctx, tx, item.slot, item.host, item.period, item.nominal, item.oldInterval, item.interval, item.timeout, now, random); err != nil {
+		if err = database.reanchor(ctx, tx, item.slot, item.host, item.period, item.nominal, item.oldInterval, item.interval, item.timeout, now, random); err != nil {
 			return err
 		}
 	}
@@ -451,7 +500,7 @@ func createAnchoredSchedule(ctx context.Context, tx *sql.Tx, hostID string, now 
 	return err
 }
 
-func reanchor(ctx context.Context, tx *sql.Tx, slotID, hostID, periodID, nominalRaw string, oldInterval, interval, timeout int64, now time.Time, random collection.Random) error {
+func (database *Database) reanchor(ctx context.Context, tx *sql.Tx, slotID, hostID, periodID, nominalRaw string, oldInterval, interval, timeout int64, now time.Time, random collection.Random) error {
 	nominal, err := parseDBTime(nominalRaw)
 	if err != nil {
 		return err
@@ -479,6 +528,11 @@ func reanchor(ctx context.Context, tx *sql.Tx, slotID, hostID, periodID, nominal
 	if _, err = tx.ExecContext(ctx, `INSERT INTO schedule_periods(id,target_type,target_id,starts_at,effective_interval_seconds,effective_timeout_seconds) VALUES(?,'host',?,?,?,?)`, newPeriod, hostID, dbTime(now), interval, timeout); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO schedule_slots(id,target_type,target_id,schedule_period_id,nominal_at,not_before_at,deadline_at,effective_interval_seconds,effective_timeout_seconds,state,process_attempts) VALUES(?,'host',?,?,?,?,?,?,?,'scheduled',0)`, newSlot, hostID, newPeriod, dbTime(now), dbTime(now.Add(jitter)), dbTime(now.Add(5*time.Second+time.Duration(timeout)*time.Second)), interval, timeout)
-	return err
+	if _, err = tx.ExecContext(ctx, `INSERT INTO schedule_slots(id,target_type,target_id,schedule_period_id,nominal_at,not_before_at,deadline_at,effective_interval_seconds,effective_timeout_seconds,state,process_attempts) VALUES(?,'host',?,?,?,?,?,?,?,'scheduled',0)`, newSlot, hostID, newPeriod, dbTime(now), dbTime(now.Add(jitter)), dbTime(now.Add(5*time.Second+time.Duration(timeout)*time.Second)), interval, timeout); err != nil {
+		return err
+	}
+	if err := database.evaluateHostAlertsTx(ctx, tx, hostID, hostAlertEvent{}, now, random); err != nil {
+		return err
+	}
+	return database.evaluateFilesystemAlertsForHostTx(ctx, tx, hostID, hostAlertEvent{}, now, random)
 }

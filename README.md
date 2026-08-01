@@ -159,7 +159,7 @@ o falta `node_modules`. Playwright siempre arranca el binario Go host recien con
 desde `build/atalaya`; no reutiliza otro servidor ni usa Vite Preview. Cada ejecucion
 crea config, clave `0600` y DB aisladas bajo `build/e2e`.
 
-## CLI implementada hasta Fase 2B
+## CLI implementada hasta Fase 5
 
 `atalaya version` y las ayudas terminan con codigo `0`. Errores operativos y los
 comandos reservados `backup` y `verify` terminan con `1`. Tambien usan `1` una
@@ -188,5 +188,6 @@ flags opcionales usa display name `Oracle`, listener `127.0.0.1:9474` y credenti
 junto al agent config. No existen overrides por variables de entorno.
 
 La UI autenticada permite gestionar tokens, cadencias, estado administrativo y
-filesystems de hosts. Consulta el [plan de implementacion](docs/implementation-plan.md)
-para el alcance y las condiciones de salida.
+filesystems de hosts, checks HTTP/TCP, reglas de alerta, incidentes, canales Discord y
+entregas. Consulta el [plan de implementacion](docs/implementation-plan.md) para el
+alcance y las condiciones de salida.

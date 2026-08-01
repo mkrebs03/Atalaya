@@ -319,6 +319,10 @@ Condiciones de salida:
 
 Objetivo: incidentes deduplicados notifican apertura y resolucion.
 
+Estado: implementada en el bootstrap v1. La migración 008, la evaluación posterior a
+resultados programados, el outbox con worker Discord, el API autenticado y las vistas
+de reglas, incidentes, canales y entregas cubren este corte.
+
 Trabajo:
 
 - Implementar reglas host unreachable, check failed y thresholds.

@@ -107,10 +107,28 @@ export interface Page<T> {
 
 export type Mutate = <T>(path: string, init?: RequestInit) => Promise<T>
 
-export function listChecks(signal?: AbortSignal, includeArchived = false) {
+export function listChecks(signal?: AbortSignal, includeArchived = false, cursor?: string) {
   const query = new URLSearchParams({ limit: '100' })
   if (includeArchived) query.set('include_archived', 'true')
+  if (cursor) query.set('cursor', cursor)
   return getJSON<Page<Check>>(`/api/v1/checks?${query}`, { signal })
+}
+
+async function collectCheckPages(signal?: AbortSignal) {
+  const items: Check[] = []
+  let cursor: string | undefined
+  for (let page = 0; page < 100; page += 1) {
+    const response = await listChecks(signal, false, cursor)
+    if (!response.data) throw new Error('paginated response missing')
+    items.push(...response.data.items)
+    if (!response.data.next_cursor) return items
+    cursor = response.data.next_cursor
+  }
+  throw new Error('pagination limit exceeded')
+}
+
+export function listAllChecks(signal?: AbortSignal) {
+  return collectCheckPages(signal)
 }
 
 export function getCheck(id: string, signal?: AbortSignal, etag?: string) {

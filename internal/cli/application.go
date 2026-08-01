@@ -27,6 +27,7 @@ import (
 	"github.com/mkrebs03/atalaya/internal/hosts"
 	"github.com/mkrebs03/atalaya/internal/httpapi"
 	metricdomain "github.com/mkrebs03/atalaya/internal/metrics"
+	"github.com/mkrebs03/atalaya/internal/notifications"
 	"github.com/mkrebs03/atalaya/internal/retention"
 	"github.com/mkrebs03/atalaya/internal/server"
 )
@@ -62,6 +63,7 @@ type Application struct {
 	newCollector      func() agent.Collector
 	runCollection     func(context.Context, collection.Repository) error
 	runChecks         func(context.Context, checks.SchedulerRepository, checks.ManualRepository, checks.Executor) error
+	runNotifications  func(context.Context, notifications.Repository) error
 	random            io.Reader
 }
 
@@ -101,6 +103,9 @@ func New(assets fs.FS) (Application, error) {
 					return (checks.ManualWorker{Repository: manualRepository, Probe: executor, Concurrency: 2}).Run(runContext)
 				},
 			)
+		},
+		runNotifications: func(ctx context.Context, repository notifications.Repository) error {
+			return (notifications.Worker{Repository: repository, Sender: notifications.DiscordSender{}}).Run(ctx)
 		},
 		newHandler: func() (http.Handler, error) {
 			return httpapi.New(assets)
@@ -488,7 +493,7 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 		TrustedProxy:    loaded.TrustedProxy,
 		ShutdownTimeout: 10 * time.Second,
 	}
-	jobs := make([]func(context.Context) error, 0, 2)
+	jobs := make([]func(context.Context) error, 0, 3)
 	if repository, ok := owner.(collection.Repository); ok && application.runCollection != nil {
 		jobs = append(jobs, func(runContext context.Context) error { return application.runCollection(runContext, repository) })
 	}
@@ -530,6 +535,9 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 		jobs = append(jobs, func(runContext context.Context) error {
 			return application.runChecks(runContext, schedulerRepository, manualRepository, probe)
 		})
+	}
+	if repository, ok := owner.(notifications.Repository); ok && application.runNotifications != nil {
+		jobs = append(jobs, func(runContext context.Context) error { return application.runNotifications(runContext, repository) })
 	}
 	var runErr error
 	if len(jobs) > 0 {

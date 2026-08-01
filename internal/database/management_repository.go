@@ -458,6 +458,9 @@ func (database *Database) SetHostAdministrativeState(ctx context.Context, id str
 	if err := cancelHostSchedule(ctx, tx, id, now, reason); err != nil {
 		return err
 	}
+	if err := database.resolveTargetRulesTx(ctx, tx, "host", id, now, reason, managementRandom{random}); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -525,6 +528,11 @@ func (database *Database) SelectFilesystem(ctx context.Context, hostID, filesyst
 	_, err = tx.ExecContext(ctx, "UPDATE hosts SET updated_at=?,version=version+1 WHERE id=? AND version=?", stamp, hostID, hostVersion)
 	if err != nil {
 		return err
+	}
+	if !selected {
+		if err := database.resolveTargetRulesTx(ctx, tx, "filesystem", filesystemID, now, "target_disabled", alertRandomSource()); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouterHistory, type RouteRecordRaw
 import { auth } from '@/auth/useAuth'
 import AuthenticatedLayout from '@/layouts/AuthenticatedLayout.vue'
 import AccountView from '@/views/AccountView.vue'
+import AlertsView from '@/views/AlertsView.vue'
 import CheckDetailView from '@/views/CheckDetailView.vue'
 import ChecksView from '@/views/ChecksView.vue'
 import HomeView from '@/views/HomeView.vue'
@@ -9,6 +10,7 @@ import HostDetailView from '@/views/HostDetailView.vue'
 import HostManagementView from '@/views/HostManagementView.vue'
 import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
+import NotificationsView from '@/views/NotificationsView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 
 const routes: RouteRecordRaw[] = [
@@ -25,6 +27,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'manage', name: 'host-management', component: HostManagementView },
       { path: 'account', name: 'account', component: AccountView },
       { path: 'settings', name: 'settings', component: SettingsView },
+      { path: 'alerts', name: 'alerts', component: AlertsView },
+      { path: 'notifications', name: 'notifications', component: NotificationsView },
       { path: ':pathMatch(.*)*', name: 'not-found', component: NotFoundView },
     ],
   },

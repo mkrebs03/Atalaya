@@ -511,6 +511,22 @@ func (database *Database) RunRetention(ctx context.Context, now time.Time) error
 			break
 		}
 	}
+	// Notification payloads and delivery attempts are operational history too;
+	// retain every terminal kind (incident, test, and skipped) for the same
+	// documented 90-day default instead of allowing the outbox to grow forever.
+	for {
+		result, err := tx.ExecContext(ctx, `DELETE FROM notification_deliveries WHERE rowid IN (SELECT rowid FROM notification_deliveries WHERE created_at<? LIMIT 1000)`, dbTime(manualCutoff))
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			break
+		}
+	}
 	for {
 		result, err := tx.ExecContext(ctx, `DELETE FROM schedule_slots WHERE rowid IN (SELECT rowid FROM schedule_slots WHERE target_type='check' AND state IN ('succeeded','failed','cancelled') AND finished_at<? LIMIT 1000)`, dbTime(cutoff))
 		if err != nil {

@@ -29,6 +29,20 @@ async function mockAuthenticatedLogin(page: import('@playwright/test').Page) {
       body: JSON.stringify({ items: [], next_cursor: null }),
     })
   })
+  await page.route('**/api/v1/incidents?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], next_cursor: null }),
+    })
+  })
+  await page.route('**/api/v1/alert-rules?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], next_cursor: null }),
+    })
+  })
   await page.route('**/api/v1/auth/login', async (route) => {
     await route.fulfill({
       status: 200,

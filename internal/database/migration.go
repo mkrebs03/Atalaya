@@ -32,6 +32,7 @@ var enrollmentMigrationSQL = mustReadMigration("migrations/004_enrollment.sql")
 var metricsMigrationSQL = mustReadMigration("migrations/005_metrics.sql")
 var retentionProgressMigrationSQL = mustReadMigration("migrations/006_retention_progress.sql")
 var checksMigrationSQL = mustReadMigration("migrations/007_checks.sql")
+var alertsNotificationsMigrationSQL = mustReadMigration("migrations/008_alerts_notifications.sql")
 
 func mustReadMigration(name string) string {
 	contents, err := migrationFiles.ReadFile(name)
@@ -58,6 +59,7 @@ func mustLoadMigrations() []migration {
 		newMigrationWithValidator(5, metricsMigrationSQL, validateSchemaV5),
 		newMigrationWithValidator(6, retentionProgressMigrationSQL, validateSchemaV6),
 		newMigrationWithValidator(7, checksMigrationSQL, validateSchemaV7),
+		newMigrationWithValidator(8, alertsNotificationsMigrationSQL, validateSchemaV8),
 	}
 }
 

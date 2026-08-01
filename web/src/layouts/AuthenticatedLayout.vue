@@ -1,12 +1,45 @@
 <script setup lang="ts">
-import { shallowRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/auth/useAuth'
 import AppMasthead from '@/components/ui/AppMasthead.vue'
+import { listAlertRules, listIncidents, type Incident } from '@/alerts/api'
+import { useHostPolling } from '@/composables/useHostPolling'
 
 const auth = useAuth()
 const router = useRouter()
 const busy = shallowRef(false)
+const incidentPolling = useHostPolling(async (signal) => {
+  const [incidentsResult, rulesResult] = await Promise.all([
+    listIncidents(signal, 'open'),
+    listAlertRules(signal),
+  ])
+  if (!incidentsResult.data || !rulesResult.data) throw new Error('alert state missing')
+  return { incidents: incidentsResult.data.items ?? [], rules: rulesResult.data.items ?? [] }
+})
+const openIncidents = computed<readonly Incident[]>(
+  () => incidentPolling.data.value?.incidents ?? [],
+)
+const pendingRules = computed(
+  () =>
+    incidentPolling.data.value?.rules.filter((rule) => rule.evaluation?.state === 'pending') ?? [],
+)
+const criticalIncidentCount = computed(
+  () => openIncidents.value.filter((incident) => incident.severity === 'critical').length,
+)
+const warningIncidentCount = computed(
+  () => openIncidents.value.filter((incident) => incident.severity === 'warning').length,
+)
+const incidentTone = computed<'critical' | 'warning'>(() =>
+  criticalIncidentCount.value > 0 ? 'critical' : 'warning',
+)
+const incidentSummary = computed(() => {
+  const parts: string[] = []
+  if (criticalIncidentCount.value) parts.push(`${criticalIncidentCount.value} critical`)
+  if (warningIncidentCount.value) parts.push(`${warningIncidentCount.value} warning`)
+  if (pendingRules.value.length) parts.push(`${pendingRules.value.length} pendientes`)
+  return `${parts.join(' · ')} requieren atención`
+})
 
 watch(auth.isAuthenticated, (authenticated) => {
   if (!authenticated) void router.replace({ name: 'login' })
@@ -36,10 +69,21 @@ async function signOut() {
     <p v-if="auth.alert.value" class="global-alert" role="alert">
       <span>Alerta de sesión</span>{{ auth.alert.value }}
     </p>
+    <RouterLink
+      v-if="openIncidents.length || pendingRules.length"
+      class="incident-alert"
+      :class="`incident-alert--${incidentTone}`"
+      to="/alerts"
+      role="status"
+      aria-live="polite"
+    >
+      <span>{{ incidentTone === 'critical' ? 'Semáforo rojo' : 'Semáforo amarillo' }}</span
+      >{{ incidentSummary }}
+    </RouterLink>
     <RouterView />
     <footer class="shell-footer">
       <p>Atalaya / observabilidad privada</p>
-      <p>Fase 04 · checks HTTP y TCP</p>
+      <p>Fase 05 · alertas y notificaciones Discord</p>
     </footer>
   </div>
 </template>
@@ -78,6 +122,34 @@ async function signOut() {
   font: 800 0.65rem var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+.incident-alert {
+  display: block;
+  width: min(calc(100% - 2rem), 70rem);
+  margin: 1rem auto 0;
+  border: 1px solid var(--accent-text);
+  padding: 0.9rem 1rem;
+  background: var(--accent-surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+.incident-alert--critical {
+  border-color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent-surface) 20%, var(--paper));
+}
+.incident-alert--warning {
+  --incident-warning: #8a5a00;
+  border-color: var(--incident-warning);
+  background: color-mix(in srgb, #e5b94d 20%, var(--paper));
+}
+.incident-alert span {
+  margin-right: 0.75rem;
+  font: 800 0.65rem var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.incident-alert--warning span {
+  color: var(--incident-warning);
 }
 .shell-footer {
   display: flex;

@@ -530,6 +530,11 @@ La respuesta de incidente incluye `state` (`open` o `resolved`) y
 condicion `unknown` cuando la evidencia esta stale o ausente; no se resuelve por falta
 de datos.
 
+Cada respuesta de regla incluye `evaluation` con `state`, `first_true_at`,
+`last_evaluated_at`, `last_value`, `last_condition_status` e `incident_id`. El estado
+administrativo (`enabled`/`archived`) y el estado de evaluacion son independientes;
+una regla habilitada puede estar `pending` o `firing`.
+
 Schemas de condicion:
 
 ```json
