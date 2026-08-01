@@ -275,7 +275,7 @@ func (database *Database) Archive(ctx context.Context, id string, version int64,
 	if archived.Valid {
 		return checks.ErrArchived
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE service_checks SET enabled=0,archived_at=?,updated_at=?,version=version+1 WHERE id=? AND version=?", dbTime(now), dbTime(now), id, version); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE service_checks SET enabled=0,observed_state='unknown',archived_at=?,updated_at=?,version=version+1 WHERE id=? AND version=?", dbTime(now), dbTime(now), id, version); err != nil {
 		return err
 	}
 	if err := cancelCheckSchedule(ctx, tx, id, "target_archived", now); err != nil {
@@ -309,7 +309,7 @@ func (database *Database) SetEnabled(ctx context.Context, id string, version int
 	if current.Enabled == enabled {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE service_checks SET enabled=?,updated_at=?,version=version+1 WHERE id=? AND version=?", boolInt(enabled), dbTime(now), id, version); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE service_checks SET enabled=?,observed_state='unknown',updated_at=?,version=version+1 WHERE id=? AND version=?", boolInt(enabled), dbTime(now), id, version); err != nil {
 		return err
 	}
 	if !enabled {
@@ -323,7 +323,7 @@ func (database *Database) SetEnabled(ctx context.Context, id string, version int
 }
 
 func (database *Database) Restore(ctx context.Context, id string, version int64, now time.Time) error {
-	result, err := database.sql.ExecContext(ctx, "UPDATE service_checks SET archived_at=NULL,enabled=0,updated_at=?,version=version+1 WHERE id=? AND version=? AND archived_at IS NOT NULL", dbTime(now), id, version)
+	result, err := database.sql.ExecContext(ctx, "UPDATE service_checks SET archived_at=NULL,enabled=0,observed_state='unknown',updated_at=?,version=version+1 WHERE id=? AND version=? AND archived_at IS NOT NULL", dbTime(now), id, version)
 	if err != nil {
 		return err
 	}
@@ -476,8 +476,8 @@ func (database *Database) ClaimScheduled(ctx context.Context, now time.Time) (ch
 	var targetURL, targetHost sql.NullString
 	var targetPort, expectedMin, expectedMax, follow, redirects checkNullableInt
 	var nominal, deadline string
-	var interval, timeout, generation int64
-	err = tx.QueryRowContext(ctx, `SELECT s.id,c.id,c.type,c.target_url,c.target_host,c.target_port,c.interval_seconds,c.timeout_seconds,c.expected_status_min,c.expected_status_max,c.follow_redirects,c.max_redirects,c.configuration_generation,s.nominal_at,s.deadline_at,s.effective_interval_seconds,s.effective_timeout_seconds FROM schedule_slots s JOIN service_checks c ON c.id=s.target_id WHERE s.target_type='check' AND s.state='scheduled' AND s.process_attempts<2 AND s.not_before_at<=? AND s.deadline_at>=? AND c.enabled=1 AND c.archived_at IS NULL ORDER BY s.not_before_at,s.id LIMIT 1`, dbTime(now), dbTime(now)).Scan(&claim.SlotID, &claim.CheckID, &typeName, &targetURL, &targetHost, &targetPort, &interval, &timeout, &expectedMin, &expectedMax, &follow, &redirects, &generation, &nominal, &deadline, &claim.Interval, &claim.Timeout)
+	var interval, timeout, generation, effectiveInterval, effectiveTimeout, processAttempts int64
+	err = tx.QueryRowContext(ctx, `SELECT s.id,c.id,c.type,c.target_url,c.target_host,c.target_port,c.interval_seconds,c.timeout_seconds,c.expected_status_min,c.expected_status_max,c.follow_redirects,c.max_redirects,c.configuration_generation,s.nominal_at,s.deadline_at,s.effective_interval_seconds,s.effective_timeout_seconds,s.process_attempts FROM schedule_slots s JOIN service_checks c ON c.id=s.target_id WHERE s.target_type='check' AND s.state='scheduled' AND s.process_attempts<2 AND s.not_before_at<=? AND s.deadline_at>=? AND c.enabled=1 AND c.archived_at IS NULL ORDER BY s.not_before_at,s.id LIMIT 1`, dbTime(now), dbTime(now)).Scan(&claim.SlotID, &claim.CheckID, &typeName, &targetURL, &targetHost, &targetPort, &interval, &timeout, &expectedMin, &expectedMax, &follow, &redirects, &generation, &nominal, &deadline, &effectiveInterval, &effectiveTimeout, &processAttempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return checks.ScheduledClaim{}, checks.ErrNoDueSlot
 	}
@@ -494,14 +494,11 @@ func (database *Database) ClaimScheduled(ctx context.Context, now time.Time) (ch
 	if err != nil {
 		return checks.ScheduledClaim{}, err
 	}
-	// SQLite scans integer durations as int64; the fields are normalized here.
-	var effectiveInterval, effectiveTimeout int64
-	if err := tx.QueryRowContext(ctx, "SELECT effective_interval_seconds,effective_timeout_seconds FROM schedule_slots WHERE id=?", claim.SlotID).Scan(&effectiveInterval, &effectiveTimeout); err != nil {
-		return checks.ScheduledClaim{}, err
-	}
 	claim.Interval = time.Duration(effectiveInterval) * time.Second
 	claim.Timeout = time.Duration(effectiveTimeout) * time.Second
-	result, err := tx.ExecContext(ctx, `UPDATE schedule_slots SET state='running',lease_until=?,started_at=COALESCE(started_at,?),process_attempts=process_attempts+1 WHERE id=? AND state='scheduled'`, dbTime(now.Add(claim.Timeout+5*time.Second)), dbTime(now), claim.SlotID)
+	claim.Attempt = int(processAttempts) + 1
+	claim.LeaseUntil = now.Add(claim.Timeout + 5*time.Second)
+	result, err := tx.ExecContext(ctx, `UPDATE schedule_slots SET state='running',lease_until=?,started_at=COALESCE(started_at,?),process_attempts=process_attempts+1 WHERE id=? AND state='scheduled' AND process_attempts=?`, dbTime(claim.LeaseUntil), dbTime(now), claim.SlotID, processAttempts)
 	if err != nil {
 		return checks.ScheduledClaim{}, err
 	}
@@ -539,7 +536,7 @@ func (database *Database) FinishScheduled(ctx context.Context, claim checks.Sche
 	var targetURL, targetHost sql.NullString
 	var targetPort, expectedMin, expectedMax, follow, redirects checkNullableInt
 	var interval, timeout int64
-	err = tx.QueryRowContext(ctx, `SELECT c.enabled,c.archived_at,c.configuration_generation,s.schedule_period_id,c.type,c.target_url,c.target_host,c.target_port,c.interval_seconds,c.timeout_seconds,c.expected_status_min,c.expected_status_max,c.follow_redirects,c.max_redirects FROM service_checks c JOIN schedule_slots s ON s.target_type='check' AND s.target_id=c.id WHERE c.id=? AND s.id=? AND s.state='running'`, claim.CheckID, claim.SlotID).Scan(&enabled, &archived, &generation, &periodID, &typeName, &targetURL, &targetHost, &targetPort, &interval, &timeout, &expectedMin, &expectedMax, &follow, &redirects)
+	err = tx.QueryRowContext(ctx, `SELECT c.enabled,c.archived_at,c.configuration_generation,s.schedule_period_id,c.type,c.target_url,c.target_host,c.target_port,c.interval_seconds,c.timeout_seconds,c.expected_status_min,c.expected_status_max,c.follow_redirects,c.max_redirects FROM service_checks c JOIN schedule_slots s ON s.target_type='check' AND s.target_id=c.id WHERE c.id=? AND s.id=? AND s.state='running' AND s.process_attempts=? AND s.lease_until=?`, claim.CheckID, claim.SlotID, claim.Attempt, dbTime(claim.LeaseUntil)).Scan(&enabled, &archived, &generation, &periodID, &typeName, &targetURL, &targetHost, &targetPort, &interval, &timeout, &expectedMin, &expectedMax, &follow, &redirects)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -554,7 +551,7 @@ func (database *Database) FinishScheduled(ctx context.Context, claim checks.Sche
 		} else if enabled == 0 {
 			reason = "target_disabled"
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schedule_slots SET state='cancelled',lease_until=NULL,cancellation_reason=?,finished_at=? WHERE id=? AND state='running'`, reason, dbTime(result.ReceivedAt), claim.SlotID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE schedule_slots SET state='cancelled',lease_until=NULL,cancellation_reason=?,finished_at=? WHERE id=? AND state='running' AND process_attempts=? AND lease_until=?`, reason, dbTime(result.ReceivedAt), claim.SlotID, claim.Attempt, dbTime(claim.LeaseUntil)); err != nil {
 			return err
 		}
 		if err := closePeriod(ctx, tx, periodID, result.ReceivedAt); err != nil {
@@ -577,7 +574,7 @@ func (database *Database) FinishScheduled(ctx context.Context, claim checks.Sche
 	if result.ErrorCode != nil && *result.ErrorCode == checks.ErrorInternal {
 		terminalState = "failed"
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE schedule_slots SET state=?,lease_until=NULL,finished_at=? WHERE id=? AND state='running'`, terminalState, dbTime(result.ReceivedAt), claim.SlotID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE schedule_slots SET state=?,lease_until=NULL,finished_at=? WHERE id=? AND state='running' AND process_attempts=? AND lease_until=?`, terminalState, dbTime(result.ReceivedAt), claim.SlotID, claim.Attempt, dbTime(claim.LeaseUntil)); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schedule_slots(id,target_type,target_id,schedule_period_id,nominal_at,not_before_at,deadline_at,effective_interval_seconds,effective_timeout_seconds,state,process_attempts) VALUES(?,'check',?,?,?,?,?,?,?,'scheduled',0)`, nextID, claim.CheckID, periodID, dbTime(nextNominal), dbTime(nextNominal.Add(jitter)), dbTime(nextNominal.Add(5*time.Second+claim.Timeout)), int64(claim.Interval/time.Second), int64(claim.Timeout/time.Second)); err != nil {
@@ -626,7 +623,7 @@ func nullableError(value *checks.ErrorCode) any {
 }
 
 func (database *Database) ReleaseScheduled(ctx context.Context, claim checks.ScheduledClaim, _ time.Time) error {
-	_, err := database.sql.ExecContext(ctx, "UPDATE schedule_slots SET state='scheduled',lease_until=NULL WHERE id=? AND state='running'", claim.SlotID)
+	_, err := database.sql.ExecContext(ctx, "UPDATE schedule_slots SET state='scheduled',lease_until=NULL WHERE id=? AND state='running' AND process_attempts=? AND lease_until=?", claim.SlotID, claim.Attempt, dbTime(claim.LeaseUntil))
 	return err
 }
 
@@ -884,15 +881,20 @@ func (database *Database) ClaimManualRun(ctx context.Context, now time.Time) (ch
 		if _, err := tx.ExecContext(ctx, `UPDATE check_runs SET state='failed',lease_until=NULL,completed_at=?,failure_code='retry_exhausted' WHERE state='running' AND lease_until<=? AND process_attempts>=2`, dbTime(now), dbTime(now)); err != nil {
 			return checks.ManualClaim{}, err
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE check_runs SET state='failed',lease_until=NULL,completed_at=?,failure_code='retry_exhausted' WHERE state='queued' AND process_attempts>=2`, dbTime(now)); err != nil {
+			return checks.ManualClaim{}, err
+		}
 		var claim checks.ManualClaim
 		var archived sql.NullString
 		var typeName string
 		var targetURL, targetHost sql.NullString
 		var targetPort, expectedMin, expectedMax, follow, redirects checkNullableInt
 		var interval, timeout int64
-		err = tx.QueryRowContext(ctx, `SELECT r.id,r.check_id,c.archived_at,c.type,r.snapshot_url,r.snapshot_host,r.snapshot_port,r.snapshot_interval_seconds,r.snapshot_timeout_seconds,r.snapshot_expected_status_min,r.snapshot_expected_status_max,r.snapshot_follow_redirects,r.snapshot_max_redirects,r.process_attempts FROM check_runs r JOIN service_checks c ON c.id=r.check_id WHERE r.state='queued' ORDER BY r.requested_at,r.id LIMIT 1`).Scan(&claim.RunID, &claim.CheckID, &archived, &typeName, &targetURL, &targetHost, &targetPort, &interval, &timeout, &expectedMin, &expectedMax, &follow, &redirects, &claim.Attempt)
+		err = tx.QueryRowContext(ctx, `SELECT r.id,r.check_id,c.archived_at,c.type,r.snapshot_url,r.snapshot_host,r.snapshot_port,r.snapshot_interval_seconds,r.snapshot_timeout_seconds,r.snapshot_expected_status_min,r.snapshot_expected_status_max,r.snapshot_follow_redirects,r.snapshot_max_redirects,r.process_attempts FROM check_runs r JOIN service_checks c ON c.id=r.check_id WHERE r.state='queued' AND r.process_attempts<2 ORDER BY r.requested_at,r.id LIMIT 1`).Scan(&claim.RunID, &claim.CheckID, &archived, &typeName, &targetURL, &targetHost, &targetPort, &interval, &timeout, &expectedMin, &expectedMax, &follow, &redirects, &claim.Attempt)
 		if errors.Is(err, sql.ErrNoRows) {
-			tx.Rollback()
+			if err := tx.Commit(); err != nil {
+				return checks.ManualClaim{}, err
+			}
 			return checks.ManualClaim{}, checks.ErrNoDueSlot
 		}
 		if err != nil {
@@ -909,7 +911,7 @@ func (database *Database) ClaimManualRun(ctx context.Context, now time.Time) (ch
 		}
 		claim.Config = configFromColumns(typeName, targetURL, targetHost, targetPort, interval, timeout, expectedMin, expectedMax, follow, redirects)
 		claim.LeaseUntil = now.Add(claim.Config.Timeout() + 5*time.Second)
-		result, err := tx.ExecContext(ctx, "UPDATE check_runs SET state='running',started_at=COALESCE(started_at,?),lease_until=?,process_attempts=process_attempts+1 WHERE id=? AND state='queued'", dbTime(now), dbTime(claim.LeaseUntil), claim.RunID)
+		result, err := tx.ExecContext(ctx, "UPDATE check_runs SET state='running',started_at=COALESCE(started_at,?),lease_until=?,process_attempts=process_attempts+1 WHERE id=? AND state='queued' AND process_attempts=?", dbTime(now), dbTime(claim.LeaseUntil), claim.RunID, claim.Attempt)
 		if err != nil {
 			return checks.ManualClaim{}, err
 		}
@@ -931,7 +933,7 @@ func (database *Database) FinishManualRun(ctx context.Context, claim checks.Manu
 	if failureCode != "" {
 		state = "failed"
 	}
-	_, err := database.sql.ExecContext(ctx, `UPDATE check_runs SET state=?,lease_until=NULL,completed_at=?,result_status=?,result_latency_ms=?,result_error_code=?,result_http_status=?,failure_code=? WHERE id=? AND state='running'`, state, dbTime(now), nullableState(result, failureCode), nullableIntPointer(result.LatencyMS), nullableError(result.ErrorCode), nullableCheckStatus(result.HTTPStatus), nullableString(failureCode), claim.RunID)
+	_, err := database.sql.ExecContext(ctx, `UPDATE check_runs SET state=?,lease_until=NULL,completed_at=?,result_status=?,result_latency_ms=?,result_error_code=?,result_http_status=?,failure_code=? WHERE id=? AND state='running' AND process_attempts=? AND lease_until=?`, state, dbTime(now), nullableState(result, failureCode), nullableIntPointer(result.LatencyMS), nullableError(result.ErrorCode), nullableCheckStatus(result.HTTPStatus), nullableString(failureCode), claim.RunID, claim.Attempt, dbTime(claim.LeaseUntil))
 	return err
 }
 
@@ -943,6 +945,6 @@ func nullableState(result checks.Result, failure string) any {
 }
 
 func (database *Database) ReleaseManualRun(ctx context.Context, claim checks.ManualClaim, _ time.Time) error {
-	_, err := database.sql.ExecContext(ctx, "UPDATE check_runs SET state='queued',lease_until=NULL WHERE id=? AND state='running'", claim.RunID)
+	_, err := database.sql.ExecContext(ctx, "UPDATE check_runs SET state='queued',lease_until=NULL WHERE id=? AND state='running' AND process_attempts=? AND lease_until=?", claim.RunID, claim.Attempt, dbTime(claim.LeaseUntil))
 	return err
 }

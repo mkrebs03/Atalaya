@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -137,6 +138,8 @@ type ScheduledClaim struct {
 	SlotID     string
 	CheckID    string
 	Config     Config
+	Attempt    int
+	LeaseUntil time.Time
 	Generation int64
 	NominalAt  time.Time
 	DeadlineAt time.Time
@@ -294,10 +297,9 @@ func ValidateConfig(config Config) error {
 			return fmt.Errorf("%w: http fragment", ErrInvalid)
 		}
 		if port := parsed.Port(); port != "" {
-			for _, r := range port {
-				if r < '0' || r > '9' {
-					return fmt.Errorf("%w: http port", ErrInvalid)
-				}
+			value, err := strconv.Atoi(port)
+			if err != nil || value < 1 || value > 65535 {
+				return fmt.Errorf("%w: http port", ErrInvalid)
 			}
 		}
 		if config.HTTP.ExpectedStatusMin < 100 || config.HTTP.ExpectedStatusMin > 599 || config.HTTP.ExpectedStatusMax < config.HTTP.ExpectedStatusMin || config.HTTP.ExpectedStatusMax > 599 {

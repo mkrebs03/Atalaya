@@ -179,7 +179,7 @@ func (probe Probe) http(parent context.Context, config HTTPConfig) Result {
 	parsed, _ := url.Parse(config.URL)
 	if err := probe.validateURL(requestContext, parsed); err != nil {
 		result.ErrorCode = pointer(errorCodeFor(err))
-		return result
+		return probe.completeResult(result, start)
 	}
 	transport := &http.Transport{
 		Proxy:                  nil,
@@ -193,7 +193,7 @@ func (probe Probe) http(parent context.Context, config HTTPConfig) Result {
 		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	} else {
 		client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-			if len(via) >= config.MaxRedirects {
+			if len(via) > config.MaxRedirects {
 				return errRedirectLimit
 			}
 			return probe.validateURL(requestContext, request.URL)
@@ -203,24 +203,22 @@ func (probe Probe) http(parent context.Context, config HTTPConfig) Result {
 	if err != nil {
 		code := ErrorInvalidTarget
 		result.ErrorCode = &code
-		return result
+		return probe.completeResult(result, start)
 	}
 	response, err := client.Do(request)
 	if err != nil {
 		result.ErrorCode = pointer(errorCodeFor(err))
-		return result
+		return probe.completeResult(result, start)
 	}
 	_ = response.Body.Close()
 	if response.StatusCode < config.ExpectedStatusMin || response.StatusCode > config.ExpectedStatusMax {
 		code := ErrorHTTPStatus
 		result.ErrorCode = &code
 		result.HTTPStatus = &response.StatusCode
-		return result
+		return probe.completeResult(result, start)
 	}
 	result.Status = StateUp
-	latency := elapsedMilliseconds(start, probe.now())
-	result.LatencyMS = &latency
-	return result
+	return probe.completeResult(result, start)
 }
 
 func (probe Probe) tcp(parent context.Context, config TCPConfig) Result {
@@ -231,17 +229,25 @@ func (probe Probe) tcp(parent context.Context, config TCPConfig) Result {
 	addresses, err := probe.Policy.Resolve(requestContext, config.Host)
 	if err != nil {
 		result.ErrorCode = pointer(errorCodeFor(err))
-		return result
+		return probe.completeResult(result, start)
 	}
 	connection, err := probe.dialAddresses(requestContext, "tcp", strconv.Itoa(config.Port), addresses)
 	if err != nil {
 		result.ErrorCode = pointer(errorCodeFor(err))
-		return result
+		return probe.completeResult(result, start)
 	}
 	_ = connection.Close()
 	result.Status = StateUp
-	latency := elapsedMilliseconds(start, probe.now())
-	result.LatencyMS = &latency
+	return probe.completeResult(result, start)
+}
+
+func (probe Probe) completeResult(result Result, start time.Time) Result {
+	received := probe.now()
+	result.ReceivedAt = received
+	if result.Status == StateUp {
+		latency := elapsedMilliseconds(start, received)
+		result.LatencyMS = &latency
+	}
 	return result
 }
 

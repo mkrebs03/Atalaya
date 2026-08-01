@@ -30,6 +30,20 @@ func (dialer testDialer) DialContext(ctx context.Context, network, _ string) (ne
 	return (&net.Dialer{}).DialContext(ctx, network, dialer.address)
 }
 
+type sequenceClock struct {
+	values []time.Time
+	index  int
+}
+
+func (clock *sequenceClock) Now() time.Time {
+	if clock.index >= len(clock.values) {
+		return clock.values[len(clock.values)-1]
+	}
+	value := clock.values[clock.index]
+	clock.index++
+	return value
+}
+
 func TestNetworkPolicyAllowsTailnetAndConfiguredRFC1918Only(t *testing.T) {
 	policy, err := NewNetworkPolicy([]string{"192.168.10.0/24", "10.0.0.0/8"})
 	if err != nil {
@@ -77,8 +91,15 @@ func TestHTTPProbeValidatesRedirectsAndUsesValidatedDialer(t *testing.T) {
 	}
 	defer listener.Close()
 	server := &http.Server{Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/redirect" {
+		switch request.URL.Path {
+		case "/redirect":
 			http.Redirect(response, request, "http://public.service/blocked", http.StatusFound)
+			return
+		case "/one-redirect":
+			http.Redirect(response, request, "/health", http.StatusFound)
+			return
+		case "/two-redirects":
+			http.Redirect(response, request, "/one-redirect", http.StatusFound)
 			return
 		}
 		response.WriteHeader(http.StatusNoContent)
@@ -106,5 +127,63 @@ func TestHTTPProbeValidatesRedirectsAndUsesValidatedDialer(t *testing.T) {
 	redirect := probe.Probe(context.Background(), Config{Type: TypeHTTP, HTTP: &HTTPConfig{URL: strings.Replace(base, "/health", "/redirect", 1), IntervalSeconds: 60, TimeoutSeconds: 5, ExpectedStatusMin: 200, ExpectedStatusMax: 299, FollowRedirects: true, MaxRedirects: 3}})
 	if redirect.Status != StateDown || redirect.ErrorCode == nil || *redirect.ErrorCode != ErrorInvalidTarget {
 		t.Fatalf("blocked redirect=%+v", redirect)
+	}
+	oneRedirect := probe.Probe(context.Background(), Config{Type: TypeHTTP, HTTP: &HTTPConfig{URL: strings.Replace(base, "/health", "/one-redirect", 1), IntervalSeconds: 60, TimeoutSeconds: 5, ExpectedStatusMin: 200, ExpectedStatusMax: 299, FollowRedirects: true, MaxRedirects: 1}})
+	if oneRedirect.Status != StateUp || oneRedirect.ErrorCode != nil {
+		t.Fatalf("one allowed redirect=%+v", oneRedirect)
+	}
+	twoRedirects := probe.Probe(context.Background(), Config{Type: TypeHTTP, HTTP: &HTTPConfig{URL: strings.Replace(base, "/health", "/two-redirects", 1), IntervalSeconds: 60, TimeoutSeconds: 5, ExpectedStatusMin: 200, ExpectedStatusMax: 299, FollowRedirects: true, MaxRedirects: 1}})
+	if twoRedirects.Status != StateDown || twoRedirects.ErrorCode == nil || *twoRedirects.ErrorCode != ErrorInvalidTarget {
+		t.Fatalf("too many redirects=%+v", twoRedirects)
+	}
+}
+
+func TestProbeStampsReceivedAtWhenOperationCompletes(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := &http.Server{Handler: http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+
+	policy, err := NewNetworkPolicy(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy.Resolver = testResolver{"service": {netip.MustParseAddr("100.64.4.5")}}
+	policy.Dialer = testDialer{address: listener.Addr().String()}
+	start := time.Date(2026, time.July, 16, 12, 0, 0, 0, time.UTC)
+	completed := start.Add(2 * time.Second)
+	probe := NewProbe(policy)
+	probe.Clock = (&sequenceClock{values: []time.Time{start, start, completed}}).Now
+	result := probe.Probe(context.Background(), Config{Type: TypeHTTP, HTTP: &HTTPConfig{URL: fmt.Sprintf("http://service:%d/health", listener.Addr().(*net.TCPAddr).Port), IntervalSeconds: 60, TimeoutSeconds: 5, ExpectedStatusMin: 200, ExpectedStatusMax: 299, MaxRedirects: 3}})
+	if result.Status != StateUp || !result.ReceivedAt.Equal(completed) {
+		t.Fatalf("successful result=%+v, want completion timestamp %s", result, completed)
+	}
+
+	failureProbe := NewProbe(policy)
+	failureProbe.Clock = (&sequenceClock{values: []time.Time{start, start, completed}}).Now
+	failure := failureProbe.Probe(context.Background(), Config{Type: TypeHTTP, HTTP: &HTTPConfig{URL: "http://missing/health", IntervalSeconds: 60, TimeoutSeconds: 5, ExpectedStatusMin: 200, ExpectedStatusMax: 299, MaxRedirects: 3}})
+	if failure.Status != StateDown || failure.ErrorCode == nil || *failure.ErrorCode != ErrorDNS || !failure.ReceivedAt.Equal(completed) {
+		t.Fatalf("failed result=%+v, want completion timestamp %s", failure, completed)
+	}
+}
+
+func TestValidateConfigRejectsHTTPPortsOutsideBounds(t *testing.T) {
+	for _, port := range []string{"0", "65536", "99999"} {
+		config := Config{Type: TypeHTTP, HTTP: &HTTPConfig{URL: "http://service.tailnet.ts.net:" + port + "/health", IntervalSeconds: 60, TimeoutSeconds: 5, ExpectedStatusMin: 200, ExpectedStatusMax: 299, MaxRedirects: 3}}
+		if err := ValidateConfig(config); err == nil {
+			t.Errorf("ValidateConfig(port=%s) = nil, want invalid port", port)
+		}
+	}
+	for _, port := range []string{"1", "65535"} {
+		config := Config{Type: TypeHTTP, HTTP: &HTTPConfig{URL: "http://service.tailnet.ts.net:" + port + "/health", IntervalSeconds: 60, TimeoutSeconds: 5, ExpectedStatusMin: 200, ExpectedStatusMax: 299, MaxRedirects: 3}}
+		if err := ValidateConfig(config); err != nil {
+			t.Errorf("ValidateConfig(port=%s) = %v, want valid port", port, err)
+		}
 	}
 }

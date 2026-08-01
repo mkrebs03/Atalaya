@@ -116,3 +116,192 @@ func TestCheckSettingsUseSharedVersionAndValidateNetworkPolicy(t *testing.T) {
 		t.Fatalf("invalid cidr error=%v", err)
 	}
 }
+
+func TestCheckAdministrativeTransitionsResetObservedState(t *testing.T) {
+	database := openTestDatabase(t, filepath.Join(t.TempDir(), "atalaya.db"))
+	ctx := context.Background()
+	random := &collectionRandom{}
+	created, err := database.Create(ctx, testHTTPCheck("API health"), testInstant, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := database.ClaimScheduled(ctx, testInstant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.FinishScheduled(ctx, claim, checks.Result{Status: checks.StateUp, ReceivedAt: testInstant.Add(time.Second)}, random); err != nil {
+		t.Fatal(err)
+	}
+	current, err := database.Get(ctx, created.ID)
+	if err != nil || current.ObservedState != checks.StateUp {
+		t.Fatalf("observed state after success=%+v err=%v", current, err)
+	}
+
+	if err := database.SetEnabled(ctx, created.ID, current.Version, false, testInstant.Add(2*time.Second), random); err != nil {
+		t.Fatal(err)
+	}
+	current, err = database.Get(ctx, created.ID)
+	if err != nil || current.ObservedState != checks.StateUnknown {
+		t.Fatalf("observed state after disable=%+v err=%v", current, err)
+	}
+	if err := database.SetEnabled(ctx, created.ID, current.Version, true, testInstant.Add(3*time.Second), random); err != nil {
+		t.Fatal(err)
+	}
+	claim, err = database.ClaimScheduled(ctx, testInstant.Add(3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.FinishScheduled(ctx, claim, checks.Result{Status: checks.StateUp, ReceivedAt: testInstant.Add(4 * time.Second)}, random); err != nil {
+		t.Fatal(err)
+	}
+	current, err = database.Get(ctx, created.ID)
+	if err != nil || current.ObservedState != checks.StateUp {
+		t.Fatalf("observed state after re-enable=%+v err=%v", current, err)
+	}
+
+	if err := database.Archive(ctx, created.ID, current.Version, testInstant.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	current, err = database.Get(ctx, created.ID)
+	if err != nil || current.ObservedState != checks.StateUnknown {
+		t.Fatalf("observed state after archive=%+v err=%v", current, err)
+	}
+	if err := database.Restore(ctx, created.ID, current.Version, testInstant.Add(6*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	current, err = database.Get(ctx, created.ID)
+	if err != nil || current.ObservedState != checks.StateUnknown {
+		t.Fatalf("observed state after restore=%+v err=%v", current, err)
+	}
+}
+
+func TestManualRunDoesNotExceedTwoProcessAttemptsAfterRelease(t *testing.T) {
+	database := openTestDatabase(t, filepath.Join(t.TempDir(), "atalaya.db"))
+	ctx := context.Background()
+	random := &collectionRandom{}
+	created, err := database.Create(ctx, testHTTPCheck("API health"), testInstant, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := database.EnqueueRun(ctx, created.ID, "retry-limit", testInstant, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := database.ClaimManualRun(ctx, testInstant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ReleaseManualRun(ctx, first, testInstant.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	second, err := database.ClaimManualRun(ctx, testInstant.Add(time.Second))
+	if err != nil || second.Attempt != 2 {
+		t.Fatalf("second manual claim=%+v err=%v", second, err)
+	}
+	if err := database.ReleaseManualRun(ctx, second, testInstant.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ClaimManualRun(ctx, testInstant.Add(2*time.Second)); !errors.Is(err, checks.ErrNoDueSlot) {
+		t.Fatalf("claim after exhausted release error=%v", err)
+	}
+	finished, err := database.GetRun(ctx, created.ID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished.State != "failed" || finished.FailureCode != "retry_exhausted" || finished.ProcessAttempts != 2 {
+		t.Fatalf("exhausted manual run=%+v", finished)
+	}
+}
+
+func TestManualRunLeaseFencesStaleWorker(t *testing.T) {
+	database := openTestDatabase(t, filepath.Join(t.TempDir(), "atalaya.db"))
+	ctx := context.Background()
+	random := &collectionRandom{}
+	created, err := database.Create(ctx, testHTTPCheck("API health"), testInstant, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := database.EnqueueRun(ctx, created.ID, "stale-worker", testInstant, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := database.ClaimManualRun(ctx, testInstant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryAt := first.LeaseUntil.Add(time.Second)
+	second, err := database.ClaimManualRun(ctx, retryAt)
+	if err != nil || second.Attempt != 2 {
+		t.Fatalf("reclaimed manual run=%+v err=%v", second, err)
+	}
+
+	if err := database.FinishManualRun(ctx, first, checks.Result{Status: checks.StateDown}, "", retryAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ReleaseManualRun(ctx, first, retryAt); err != nil {
+		t.Fatal(err)
+	}
+	running, err := database.GetRun(ctx, created.ID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.State != "running" || running.ProcessAttempts != 2 {
+		t.Fatalf("stale worker changed current manual attempt=%+v", running)
+	}
+	if err := database.FinishManualRun(ctx, second, checks.Result{Status: checks.StateUp}, "", retryAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := database.GetRun(ctx, created.ID, run.ID)
+	if err != nil || finished.State != "completed" || finished.Result == nil || finished.Result.Status != checks.StateUp {
+		t.Fatalf("current manual attempt=%+v err=%v", finished, err)
+	}
+}
+
+func TestScheduledClaimLeaseFencesStaleWorker(t *testing.T) {
+	database := openTestDatabase(t, filepath.Join(t.TempDir(), "atalaya.db"))
+	ctx := context.Background()
+	random := &collectionRandom{}
+	created, err := database.Create(ctx, testHTTPCheck("API health"), testInstant, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := database.ClaimScheduled(ctx, testInstant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryAt := testInstant.Add(time.Second)
+	if err := database.ReleaseScheduled(ctx, first, retryAt); err != nil {
+		t.Fatal(err)
+	}
+	second, err := database.ClaimScheduled(ctx, retryAt)
+	if err != nil || second.Attempt != 2 {
+		t.Fatalf("reclaimed scheduled slot=%+v err=%v", second, err)
+	}
+	if err := database.ReleaseScheduled(ctx, first, retryAt); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var attempts int
+	if err := database.sql.QueryRow("SELECT state,process_attempts FROM schedule_slots WHERE id=?", first.SlotID).Scan(&state, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if state != "running" || attempts != 2 {
+		t.Fatalf("stale release changed scheduled slot state=%s attempts=%d", state, attempts)
+	}
+	if err := database.FinishScheduled(ctx, first, checks.Result{Status: checks.StateDown, ReceivedAt: retryAt}, random); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.sql.QueryRow("SELECT state FROM schedule_slots WHERE id=?", first.SlotID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "running" {
+		t.Fatalf("stale finish changed scheduled slot state=%s", state)
+	}
+	if err := database.FinishScheduled(ctx, second, checks.Result{Status: checks.StateUp, ReceivedAt: retryAt.Add(time.Second)}, random); err != nil {
+		t.Fatal(err)
+	}
+	current, err := database.Get(ctx, created.ID)
+	if err != nil || current.ObservedState != checks.StateUp {
+		t.Fatalf("current scheduled result=%+v err=%v", current, err)
+	}
+}
