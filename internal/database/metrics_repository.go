@@ -434,6 +434,9 @@ func (database *Database) RunRetention(ctx context.Context, now time.Time) error
 		if err := persistRollupBucket(ctx, tx, bucket, bucket.Add(time.Hour), now.UTC()); err != nil {
 			return err
 		}
+		if err := persistCheckRollupBucket(ctx, tx, bucket, bucket.Add(time.Hour), now.UTC()); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE retention_progress SET last_rollup_bucket_start=?,updated_at=? WHERE id=1`, dbTime(bucket), dbTime(now)); err != nil {
 			return err
 		}
@@ -456,6 +459,19 @@ func (database *Database) RunRetention(ctx context.Context, now time.Time) error
 		}
 	}
 	for {
+		result, err := tx.ExecContext(ctx, `DELETE FROM check_results WHERE rowid IN (SELECT r.rowid FROM check_results r WHERE r.received_at<? AND EXISTS (SELECT 1 FROM check_hourly_rollups h WHERE h.check_id=r.check_id AND h.metric_key='availability' AND h.bucket_start=substr(r.received_at,1,13)||':00:00Z') LIMIT 1000)`, dbTime(cutoff))
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			break
+		}
+	}
+	for {
 		result, err := tx.ExecContext(ctx, `DELETE FROM hourly_rollups WHERE rowid IN (SELECT rowid FROM hourly_rollups WHERE bucket_end<=? LIMIT 1000)`, dbTime(rollupCutoff))
 		if err != nil {
 			return err
@@ -465,6 +481,46 @@ func (database *Database) RunRetention(ctx context.Context, now time.Time) error
 			if err != nil {
 				return err
 			}
+			break
+		}
+	}
+	for {
+		result, err := tx.ExecContext(ctx, `DELETE FROM check_hourly_rollups WHERE rowid IN (SELECT rowid FROM check_hourly_rollups WHERE bucket_end<=? LIMIT 1000)`, dbTime(rollupCutoff))
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			break
+		}
+	}
+	manualCutoff := now.UTC().Add(-90 * 24 * time.Hour)
+	for {
+		result, err := tx.ExecContext(ctx, `DELETE FROM check_runs WHERE rowid IN (SELECT rowid FROM check_runs WHERE completed_at IS NOT NULL AND completed_at<? LIMIT 1000)`, dbTime(manualCutoff))
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			break
+		}
+	}
+	for {
+		result, err := tx.ExecContext(ctx, `DELETE FROM schedule_slots WHERE rowid IN (SELECT rowid FROM schedule_slots WHERE target_type='check' AND state IN ('succeeded','failed','cancelled') AND finished_at<? LIMIT 1000)`, dbTime(cutoff))
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
 			break
 		}
 	}
@@ -479,7 +535,6 @@ func persistRollupBucket(ctx context.Context, tx *sql.Tx, bucket, bucketEnd, now
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var hostID, scopeID, metricKey string
 		var filesystemID sql.NullString
@@ -507,6 +562,56 @@ func persistRollupBucket(ctx context.Context, tx *sql.Tx, bucket, bucketEnd, now
 		}
 	}
 	return rows.Err()
+}
+
+func persistCheckRollupBucket(ctx context.Context, tx *sql.Tx, bucket, bucketEnd, now time.Time) error {
+	rows, err := tx.QueryContext(ctx, `SELECT check_id,MIN(CASE WHEN status='up' THEN 1.0 ELSE 0.0 END),MAX(CASE WHEN status='up' THEN 1.0 ELSE 0.0 END),AVG(CASE WHEN status='up' THEN 1.0 ELSE 0.0 END),COUNT(*),SUM(CASE WHEN status='up' THEN 1 ELSE 0 END) FROM check_results WHERE received_at>=? AND received_at<? GROUP BY check_id`, dbTime(bucket), dbTime(bucketEnd))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var checkID string
+		var minValue, maxValue, average float64
+		var count, successful int64
+		if err := rows.Scan(&checkID, &minValue, &maxValue, &average, &count, &successful); err != nil {
+			return err
+		}
+		var point metrics.Point
+		point.ExpectedSampleCount = nil
+		point.CoveredSlotCount = nil
+		if err := fillCheckCoverage(ctx, tx, checkID, bucket, bucketEnd, &point); err != nil {
+			return err
+		}
+		complete := bucketEnd.Before(now) && point.ExpectedSampleCount != nil && point.CoveredSlotCount != nil && *point.ExpectedSampleCount <= *point.CoveredSlotCount
+		if _, err := tx.ExecContext(ctx, `INSERT INTO check_hourly_rollups(check_id,metric_key,bucket_start,bucket_end,min_value,max_value,average_value,sample_count,successful_count,expected_sample_count,covered_slot_count,complete,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(check_id,metric_key,bucket_start) DO UPDATE SET bucket_end=excluded.bucket_end,min_value=excluded.min_value,max_value=excluded.max_value,average_value=excluded.average_value,sample_count=excluded.sample_count,successful_count=excluded.successful_count,expected_sample_count=excluded.expected_sample_count,covered_slot_count=excluded.covered_slot_count,complete=excluded.complete,updated_at=excluded.updated_at`, checkID, "availability", dbTime(bucket), dbTime(bucketEnd), minValue, maxValue, average, count, successful, nullableInt(point.ExpectedSampleCount), nullableInt(point.CoveredSlotCount), boolInt(complete), dbTime(now)); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	latencyRows, err := tx.QueryContext(ctx, `SELECT check_id,MIN(latency_ms),MAX(latency_ms),AVG(latency_ms),COUNT(*) FROM check_results WHERE status='up' AND latency_ms IS NOT NULL AND received_at>=? AND received_at<? GROUP BY check_id`, dbTime(bucket), dbTime(bucketEnd))
+	if err != nil {
+		return err
+	}
+	defer latencyRows.Close()
+	for latencyRows.Next() {
+		var checkID string
+		var minValue, maxValue, average float64
+		var count int64
+		if err := latencyRows.Scan(&checkID, &minValue, &maxValue, &average, &count); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO check_hourly_rollups(check_id,metric_key,bucket_start,bucket_end,min_value,max_value,average_value,sample_count,complete,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(check_id,metric_key,bucket_start) DO UPDATE SET bucket_end=excluded.bucket_end,min_value=excluded.min_value,max_value=excluded.max_value,average_value=excluded.average_value,sample_count=excluded.sample_count,complete=excluded.complete,updated_at=excluded.updated_at`, checkID, "latency_ms", dbTime(bucket), dbTime(bucketEnd), minValue, maxValue, average, count, boolInt(bucketEnd.Before(now)), dbTime(now)); err != nil {
+			return err
+		}
+	}
+	return latencyRows.Err()
 }
 
 func nullableInt(value *int64) any {

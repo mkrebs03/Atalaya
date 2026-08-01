@@ -17,7 +17,7 @@ defineEmits<{
       <RouterLink class="masthead__brand" to="/" aria-label="Atalaya, resumen">
         <AtalayaMark />
       </RouterLink>
-      <p class="masthead__phase">Fase 03 <span>/</span> Históricos y señal</p>
+      <p class="masthead__phase">Fase 04 <span>/</span> Checks de servicio</p>
       <div class="masthead__session">
         <p class="masthead__user">
           <span class="masthead__signal" aria-hidden="true"></span>
@@ -33,6 +33,7 @@ defineEmits<{
       <p class="masthead__section-label">Puesto de observación</p>
       <nav class="masthead__navigation" aria-label="Principal">
         <RouterLink to="/">Resumen</RouterLink>
+        <RouterLink to="/checks">Checks</RouterLink>
         <RouterLink to="/manage">Gestionar</RouterLink>
         <RouterLink to="/settings">Configurar</RouterLink>
         <RouterLink to="/account">Cuenta</RouterLink>

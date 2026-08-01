@@ -8,7 +8,7 @@ import { hasIncompleteHourlyRollups, hasMetricGaps, metricGapThresholdSeconds } 
 const props = withDefaults(
   defineProps<{
     title: string
-    unit: 'percent' | 'bytes'
+    unit: 'percent' | 'bytes' | 'ratio' | 'milliseconds'
     points: readonly MetricPoint[]
     gapThresholdSeconds?: number
   }>(),
@@ -28,6 +28,10 @@ const hasIncomplete = computed(() => hasIncompleteHourlyRollups(props.points))
 function formatValue(value: number): string {
   if (props.unit === 'percent')
     return `${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 1 }).format(value)} %`
+  if (props.unit === 'ratio')
+    return `${new Intl.NumberFormat('es-CL', { style: 'percent', maximumFractionDigits: 1 }).format(value)}`
+  if (props.unit === 'milliseconds')
+    return `${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(value)} ms`
   if (value === 0) return '0 B'
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)

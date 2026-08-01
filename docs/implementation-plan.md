@@ -278,6 +278,10 @@ Condiciones de salida:
 
 Objetivo: servicios configurables y observados desde servidor.
 
+Estado: implementada en el bootstrap v1. La migración 007, el API autenticado, los
+workers del servidor y las vistas de lista/detalle cubren este corte; alertas y
+notificaciones permanecen fuera de alcance hasta la Fase 5.
+
 Trabajo:
 
 - Implementar modelo/API/UI CRUD tipado de checks.

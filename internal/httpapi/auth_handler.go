@@ -18,10 +18,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/mkrebs03/atalaya/internal/auth"
+	"github.com/mkrebs03/atalaya/internal/checks"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	"github.com/mkrebs03/atalaya/internal/hostquery"
 	"github.com/mkrebs03/atalaya/internal/hosts"
 	"github.com/mkrebs03/atalaya/internal/metrics"
+	settingsdomain "github.com/mkrebs03/atalaya/internal/settings"
 )
 
 const sessionCookie = "atalaya_session"
@@ -42,11 +44,14 @@ type AuthConfig struct {
 }
 
 type authAPI struct {
-	service    *auth.Service
-	config     AuthConfig
-	hosts      hostquery.Repository
-	management hosts.ManagementRepository
-	metrics    metrics.Repository
+	service      *auth.Service
+	config       AuthConfig
+	hosts        hostquery.Repository
+	management   hosts.ManagementRepository
+	metrics      metrics.Repository
+	checks       checks.Repository
+	checkMetrics metrics.CheckRepository
+	settings     settingsdomain.Repository
 }
 
 func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, hostRepositories ...hostquery.Repository) (http.Handler, error) {
@@ -83,6 +88,15 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		}
 		if repository, ok := hostRepositories[0].(metrics.Repository); ok {
 			api.metrics = repository
+		}
+		if repository, ok := hostRepositories[0].(checks.Repository); ok {
+			api.checks = repository
+		}
+		if repository, ok := hostRepositories[0].(metrics.CheckRepository); ok {
+			api.checkMetrics = repository
+		}
+		if repository, ok := hostRepositories[0].(settingsdomain.Repository); ok {
+			api.settings = repository
 		}
 	}
 	mux := http.NewServeMux()
@@ -130,10 +144,31 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		mux.HandleFunc("/api/v1/enrollment-tokens", api.methodNotAllowed)
 		mux.HandleFunc("/api/v1/enrollment-tokens/{id}", api.methodNotAllowed)
 	}
-	if api.metrics != nil {
+	if api.metrics != nil || api.settings != nil {
 		mux.HandleFunc("GET /api/v1/settings", api.getSettings)
 		mux.HandleFunc("PATCH /api/v1/settings", api.patchSettings)
 		mux.HandleFunc("/api/v1/settings", api.methodNotAllowed)
+	}
+	if api.checks != nil {
+		mux.HandleFunc("GET /api/v1/checks", api.listChecks)
+		mux.HandleFunc("POST /api/v1/checks", api.createCheck)
+		mux.HandleFunc("/api/v1/checks", api.methodNotAllowed)
+		mux.HandleFunc("GET /api/v1/checks/{id}", api.getCheck)
+		mux.HandleFunc("PATCH /api/v1/checks/{id}", api.patchCheck)
+		mux.HandleFunc("DELETE /api/v1/checks/{id}", api.archiveCheck)
+		mux.HandleFunc("POST /api/v1/checks/{id}/enable", api.enableCheck)
+		mux.HandleFunc("POST /api/v1/checks/{id}/disable", api.disableCheck)
+		mux.HandleFunc("POST /api/v1/checks/{id}/restore", api.restoreCheck)
+		mux.HandleFunc("POST /api/v1/checks/{id}/run", api.runCheck)
+		mux.HandleFunc("GET /api/v1/checks/{id}/runs", api.listCheckRuns)
+		mux.HandleFunc("GET /api/v1/checks/{id}/runs/{run_id}", api.getCheckRun)
+		mux.HandleFunc("/api/v1/checks/{id}", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/checks/{id}/runs", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/checks/{id}/runs/{run_id}", api.methodNotAllowed)
+		mux.HandleFunc("/api/v1/checks/{id}/results", api.methodNotAllowed)
+		if api.checkMetrics != nil {
+			mux.HandleFunc("GET /api/v1/checks/{id}/results", api.getCheckMetrics)
+		}
 	}
 	mux.HandleFunc("/api", api.notFound)
 	mux.HandleFunc("/api/", api.notFound)

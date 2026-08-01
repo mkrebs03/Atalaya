@@ -39,7 +39,7 @@ async function signOut() {
     <RouterView />
     <footer class="shell-footer">
       <p>Atalaya / observabilidad privada</p>
-      <p>Fase 03 · históricos y retención</p>
+      <p>Fase 04 · checks HTTP y TCP</p>
     </footer>
   </div>
 </template>

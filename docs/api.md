@@ -619,21 +619,25 @@ Rangos:
   ambas duraciones a segundos. Por tanto, si raw supera 7 dias, el minimo efectivo de
   rollup pasa a ser el valor de raw.
 
-La Fase 3 expone inicialmente la parte de retencion del recurso singleton:
+El recurso singleton expone retención, defaults de checks y la lista normalizada de
+CIDRs privados autorizados:
 
 ```json
 {
   "raw_retention_seconds": 172800,
   "rollup_retention_seconds": 7776000,
+  "check_interval_seconds": 60,
+  "check_timeout_seconds": 10,
+  "allowed_private_cidrs": [],
   "updated_at": "RFC3339",
   "version": 1
 }
 ```
 
-`GET /api/v1/settings` devuelve este objeto y su ETag. `PATCH` acepta uno o ambos
-campos, exige sesion, CSRF e `If-Match`, y devuelve el objeto actualizado. Reducir una
-retencion aplica en el siguiente ciclo y puede eliminar datos de forma irreversible;
-aumentarla no recupera muestras ya eliminadas.
+`GET /api/v1/settings` devuelve este objeto y su ETag. `PATCH` acepta uno o más campos,
+exige sesión, CSRF e `If-Match`, valida todo el recurso y actualiza la versión una sola
+vez de forma atómica. Reducir una retención aplica en el siguiente ciclo y puede
+eliminar datos de forma irreversible; aumentarla no recupera muestras ya eliminadas.
 
 Intervalos nuevos aplican al primer slot que se cree despues del cambio. Cada slot
 conserva intervalo y timeout efectivos; el cambio no modifica slots ni deadlines ya

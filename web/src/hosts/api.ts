@@ -86,6 +86,7 @@ export interface MetricPoint {
   min: number
   max: number
   sample_count: number
+  successful_count?: number
   covered_slot_count?: number
   expected_sample_count?: number
   complete?: boolean
@@ -93,7 +94,7 @@ export interface MetricPoint {
 
 export interface MetricSeries {
   key: string
-  unit: 'percent' | 'bytes'
+  unit: 'percent' | 'bytes' | 'ratio' | 'milliseconds'
   filesystem_id?: string
   mount_point?: string
   points: MetricPoint[]

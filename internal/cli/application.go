@@ -18,6 +18,7 @@ import (
 	"github.com/mkrebs03/atalaya/internal/agent"
 	"github.com/mkrebs03/atalaya/internal/auth"
 	"github.com/mkrebs03/atalaya/internal/buildinfo"
+	"github.com/mkrebs03/atalaya/internal/checks"
 	"github.com/mkrebs03/atalaya/internal/collection"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	atalayacrypto "github.com/mkrebs03/atalaya/internal/crypto"
@@ -60,6 +61,7 @@ type Application struct {
 	runAgent          func(context.Context, string, http.Handler) error
 	newCollector      func() agent.Collector
 	runCollection     func(context.Context, collection.Repository) error
+	runChecks         func(context.Context, checks.SchedulerRepository, checks.ManualRepository, checks.Executor) error
 	random            io.Reader
 }
 
@@ -89,6 +91,16 @@ func New(assets fs.FS) (Application, error) {
 				jobs = append(jobs, worker.Run)
 			}
 			return runConcurrentJobs(ctx, jobs...)
+		},
+		runChecks: func(ctx context.Context, schedulerRepository checks.SchedulerRepository, manualRepository checks.ManualRepository, executor checks.Executor) error {
+			return runConcurrentJobs(ctx,
+				func(runContext context.Context) error {
+					return (checks.Scheduler{Repository: schedulerRepository, Probe: executor, Concurrency: 2}).Run(runContext)
+				},
+				func(runContext context.Context) error {
+					return (checks.ManualWorker{Repository: manualRepository, Probe: executor, Concurrency: 2}).Run(runContext)
+				},
+			)
 		},
 		newHandler: func() (http.Handler, error) {
 			return httpapi.New(assets)
@@ -476,9 +488,52 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 		TrustedProxy:    loaded.TrustedProxy,
 		ShutdownTimeout: 10 * time.Second,
 	}
-	var runErr error
+	jobs := make([]func(context.Context) error, 0, 2)
 	if repository, ok := owner.(collection.Repository); ok && application.runCollection != nil {
-		runErr = runServerAndCollection(ctx, application.runServer, application.runCollection, processConfig, handler, repository)
+		jobs = append(jobs, func(runContext context.Context) error { return application.runCollection(runContext, repository) })
+	}
+	if schedulerRepository, ok := owner.(checks.SchedulerRepository); ok && application.runChecks != nil {
+		manualRepository, manualOK := owner.(checks.ManualRepository)
+		if !manualOK {
+			_ = owner.Close()
+			fmt.Fprintln(stderr, "atalaya server: database does not support manual checks")
+			return exitRuntime
+		}
+		settingsRepository, settingsOK := owner.(interface {
+			GetCheckSettings(context.Context) (checks.Settings, error)
+		})
+		policy := checks.NetworkPolicy{}
+		if settingsOK {
+			current, settingsErr := settingsRepository.GetCheckSettings(ctx)
+			if settingsErr != nil {
+				_ = owner.Close()
+				fmt.Fprintf(stderr, "atalaya server: read check settings: %v\n", settingsErr)
+				return exitRuntime
+			}
+			policy, err = checks.NewNetworkPolicy(current.AllowedPrivateCIDRs)
+			if err != nil {
+				_ = owner.Close()
+				fmt.Fprintf(stderr, "atalaya server: validate check settings: %v\n", err)
+				return exitRuntime
+			}
+		}
+		probe := checks.NewProbe(policy)
+		if settingsOK {
+			probe.PolicyProvider = func(runContext context.Context) (checks.NetworkPolicy, error) {
+				current, settingsErr := settingsRepository.GetCheckSettings(runContext)
+				if settingsErr != nil {
+					return checks.NetworkPolicy{}, settingsErr
+				}
+				return checks.NewNetworkPolicy(current.AllowedPrivateCIDRs)
+			}
+		}
+		jobs = append(jobs, func(runContext context.Context) error {
+			return application.runChecks(runContext, schedulerRepository, manualRepository, probe)
+		})
+	}
+	var runErr error
+	if len(jobs) > 0 {
+		runErr = runServerAndJobs(ctx, application.runServer, processConfig, handler, jobs...)
 	} else {
 		runErr = application.runServer(ctx, processConfig, handler)
 	}
@@ -495,19 +550,34 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 }
 
 func runServerAndCollection(ctx context.Context, runServer func(context.Context, server.Config, http.Handler) error, runCollection func(context.Context, collection.Repository) error, config server.Config, handler http.Handler, repository collection.Repository) error {
+	return runServerAndJobs(ctx, runServer, config, handler, func(runContext context.Context) error {
+		return runCollection(runContext, repository)
+	})
+}
+
+func runServerAndJobs(ctx context.Context, runServer func(context.Context, server.Config, http.Handler) error, config server.Config, handler http.Handler, jobs ...func(context.Context) error) error {
 	coordinated, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errorsChannel := make(chan error, 2)
+	errorsChannel := make(chan error, len(jobs)+1)
 	go func() { errorsChannel <- runServer(coordinated, config, handler) }()
-	go func() { errorsChannel <- runCollection(coordinated, repository) }()
+	for _, job := range jobs {
+		go func(run func(context.Context) error) { errorsChannel <- run(coordinated) }(job)
+	}
 	first := <-errorsChannel
 	cancel()
-	second := <-errorsChannel
-	if first != nil && !errors.Is(first, context.Canceled) {
-		return first
+	firstErr := first
+	if firstErr != nil && !errors.Is(firstErr, context.Canceled) {
+		cancel()
 	}
-	if second != nil && !errors.Is(second, context.Canceled) {
-		return second
+	for range jobs {
+		err := <-errorsChannel
+		if err != nil && !errors.Is(err, context.Canceled) && firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+	}
+	if firstErr != nil && !errors.Is(firstErr, context.Canceled) {
+		return firstErr
 	}
 	return nil
 }

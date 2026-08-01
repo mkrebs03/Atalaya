@@ -24,6 +24,7 @@ const (
 
 var (
 	ErrNotFound         = errors.New("host not found")
+	ErrCheckNotFound    = errors.New("check not found")
 	ErrRawNotAvailable  = errors.New("raw metrics are not available for the requested range")
 	ErrPointLimit       = errors.New("metric point limit exceeded")
 	ErrSettingsConflict = errors.New("retention settings version conflict")
@@ -61,6 +62,7 @@ type Point struct {
 	Min                 float64    `json:"min"`
 	Max                 float64    `json:"max"`
 	SampleCount         int64      `json:"sample_count"`
+	SuccessfulCount     *int64     `json:"successful_count,omitempty"`
 	CoveredSlotCount    *int64     `json:"covered_slot_count,omitempty"`
 	ExpectedSampleCount *int64     `json:"expected_sample_count,omitempty"`
 	Complete            bool       `json:"complete"`
@@ -101,6 +103,10 @@ type Repository interface {
 
 type RetentionRepository interface {
 	RunRetention(context.Context, time.Time) error
+}
+
+type CheckRepository interface {
+	QueryCheckMetrics(context.Context, string, Query) (Response, error)
 }
 
 func ValidateQuery(query Query) error {

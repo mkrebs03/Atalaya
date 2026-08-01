@@ -7,7 +7,18 @@ import (
 	"time"
 
 	"github.com/mkrebs03/atalaya/internal/metrics"
+	settingsdomain "github.com/mkrebs03/atalaya/internal/settings"
 )
+
+type settingsJSON struct {
+	RawRetentionSeconds    int64     `json:"raw_retention_seconds"`
+	RollupRetentionSeconds int64     `json:"rollup_retention_seconds"`
+	CheckIntervalSeconds   int       `json:"check_interval_seconds"`
+	CheckTimeoutSeconds    int       `json:"check_timeout_seconds"`
+	AllowedPrivateCIDRs    []string  `json:"allowed_private_cidrs"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	Version                int64     `json:"version"`
+}
 
 func (api *authAPI) getHostMetrics(response http.ResponseWriter, request *http.Request) {
 	if _, ok := api.authenticate(response, request); !ok {
@@ -80,6 +91,16 @@ func (api *authAPI) getSettings(response http.ResponseWriter, request *http.Requ
 	if _, ok := api.authenticate(response, request); !ok {
 		return
 	}
+	if api.settings != nil {
+		settings, err := api.settings.GetSettings(request.Context())
+		if err != nil {
+			api.internal(response, request, err)
+			return
+		}
+		response.Header().Set("ETag", fmt.Sprintf("\"%d\"", settings.Version))
+		writeJSON(response, http.StatusOK, settingsResponse(settings))
+		return
+	}
 	settings, err := api.metrics.GetRetentionSettings(request.Context())
 	if err != nil {
 		api.internal(response, request, err)
@@ -96,6 +117,29 @@ func (api *authAPI) patchSettings(response http.ResponseWriter, request *http.Re
 	}
 	version, ok := requireIfMatch(response, request)
 	if !ok {
+		return
+	}
+	if api.settings != nil {
+		var patch settingsdomain.Patch
+		if err := decodeJSON(response, request, &patch); err != nil || patch.RawRetentionSeconds == nil && patch.RollupRetentionSeconds == nil && patch.CheckIntervalSeconds == nil && patch.CheckTimeoutSeconds == nil && patch.AllowedPrivateCIDRs == nil {
+			api.writeError(response, request, http.StatusBadRequest, "validation_failed", "Request is invalid", nil)
+			return
+		}
+		settings, err := api.settings.UpdateSettings(request.Context(), patch, version, api.config.Clock().UTC())
+		if errors.Is(err, settingsdomain.ErrVersionConflict) {
+			writeBareError(response, request, http.StatusPreconditionFailed, "version_conflict", "Resource version does not match")
+			return
+		}
+		if errors.Is(err, settingsdomain.ErrInvalid) {
+			api.writeError(response, request, http.StatusUnprocessableEntity, "validation_failed", "Settings are invalid", nil)
+			return
+		}
+		if err != nil {
+			api.internal(response, request, err)
+			return
+		}
+		response.Header().Set("ETag", fmt.Sprintf("\"%d\"", settings.Version))
+		writeJSON(response, http.StatusOK, settingsResponse(settings))
 		return
 	}
 	var patch metrics.SettingsPatch
@@ -119,6 +163,10 @@ func (api *authAPI) patchSettings(response http.ResponseWriter, request *http.Re
 	}
 	response.Header().Set("ETag", fmt.Sprintf("\"%d\"", settings.Version))
 	writeJSON(response, http.StatusOK, settings)
+}
+
+func settingsResponse(value settingsdomain.Settings) settingsJSON {
+	return settingsJSON{RawRetentionSeconds: value.RawRetentionSeconds, RollupRetentionSeconds: value.RollupRetentionSeconds, CheckIntervalSeconds: value.CheckIntervalSeconds, CheckTimeoutSeconds: value.CheckTimeoutSeconds, AllowedPrivateCIDRs: value.AllowedPrivateCIDRs, UpdatedAt: value.UpdatedAt, Version: value.Version}
 }
 
 func parseMetricTime(value string) (time.Time, bool) {

@@ -8,6 +8,9 @@ import { getRetentionSettings, updateRetentionSettings } from '@/settings/api'
 const auth = useAuth()
 const rawHours = ref(48)
 const rollupDays = ref(90)
+const checkInterval = ref(60)
+const checkTimeout = ref(10)
+const privateCIDRs = ref('')
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
@@ -23,6 +26,9 @@ watch(
     if (!value) return
     rawHours.value = value.raw_retention_seconds / 3600
     rollupDays.value = value.rollup_retention_seconds / 86400
+    checkInterval.value = value.check_interval_seconds
+    checkTimeout.value = value.check_timeout_seconds
+    privateCIDRs.value = value.allowed_private_cidrs.join('\n')
   },
   { immediate: true },
 )
@@ -36,6 +42,12 @@ async function save() {
     await updateRetentionSettings(auth.mutate, settings.data.value, {
       raw_retention_seconds: Math.round(rawHours.value * 3600),
       rollup_retention_seconds: Math.round(rollupDays.value * 86400),
+      check_interval_seconds: Number(checkInterval.value),
+      check_timeout_seconds: Number(checkTimeout.value),
+      allowed_private_cidrs: privateCIDRs.value
+        .split(/[\s,]+/)
+        .map((value) => value.trim())
+        .filter(Boolean),
     })
     success.value = 'Retención guardada. Se aplicará en el siguiente ciclo de mantenimiento.'
     settings.restart()
@@ -51,16 +63,16 @@ async function save() {
   <main id="main-content" class="settings route-view" tabindex="-1">
     <section class="settings__intro">
       <PageIntro
-        index="03"
-        eyebrow="Configuración / históricos"
+        index="04"
+        eyebrow="Configuración / política de señal"
         title="Conservar la señal justa."
-        copy="Define cuánto tiempo permanecen las muestras crudas y los agregados horarios. Reducir la retención elimina datos en el siguiente ciclo y no puede recuperar lo ya borrado."
+        copy="Define retención, cadencia y redes privadas autorizadas. Los checks nunca salen a destinos públicos por defecto; los cambios de red se validan antes de cada conexión."
       />
     </section>
     <section class="settings__workspace" aria-labelledby="retention-title">
       <aside class="settings__aside">
         <p>Política de datos</p>
-        <h2>Raw y hourly.</h2>
+        <h2>Retención y egress.</h2>
         <p>
           La base almacena UTC. Los gráficos eligen automáticamente la resolución y conservan los
           huecos de recepción.
@@ -78,6 +90,28 @@ async function save() {
             Muestras crudas (horas)
             <input v-model.number="rawHours" type="number" min="24" max="720" step="1" required />
             <small>Entre 24 horas y 30 días.</small>
+          </label>
+          <label>
+            Intervalo por defecto de checks (segundos)
+            <input
+              v-model.number="checkInterval"
+              type="number"
+              min="15"
+              max="3600"
+              step="1"
+              required
+            />
+            <small>Entre 15 segundos y 1 hora. Se usa al crear un check.</small>
+          </label>
+          <label>
+            Timeout por defecto de checks (segundos)
+            <input v-model.number="checkTimeout" type="number" min="1" max="60" step="1" required />
+            <small>Debe ser menor que el intervalo.</small>
+          </label>
+          <label>
+            CIDRs privados autorizados
+            <textarea v-model="privateCIDRs" rows="4" placeholder="192.168.1.0/24\n10.20.0.0/16" />
+            <small>Uno por línea. RFC1918 solamente; Tailscale se permite por defecto.</small>
           </label>
           <label>
             Agregados horarios (días)
@@ -161,13 +195,15 @@ async function save() {
   gap: 0.45rem;
   font-weight: 800;
 }
-.settings input {
+.settings input,
+.settings textarea {
   min-height: 3rem;
   border: 1px solid var(--line-strong);
   padding: 0.7rem;
   background: var(--paper);
   color: var(--ink);
   font: inherit;
+  resize: vertical;
 }
 .settings small {
   color: var(--ink-muted);

@@ -158,6 +158,54 @@ func validateSchemaV6(ctx context.Context, query queryer) error {
 	return validateMigrationObjects(ctx, query, retentionProgressMigrationSQL)
 }
 
+func validateSchemaV7(ctx context.Context, query queryer) error {
+	if err := validateSchemaV6(ctx, query); err != nil {
+		return err
+	}
+	for _, table := range []struct {
+		name    string
+		columns []expectedColumn
+	}{
+		{"service_checks", []expectedColumn{
+			{"id", "TEXT", true, 1}, {"name", "TEXT", true, 0}, {"related_host_id", "TEXT", false, 0},
+			{"type", "TEXT", true, 0}, {"target_url", "TEXT", false, 0}, {"target_host", "TEXT", false, 0},
+			{"target_port", "INTEGER", false, 0}, {"interval_seconds", "INTEGER", true, 0}, {"timeout_seconds", "INTEGER", true, 0},
+			{"expected_status_min", "INTEGER", false, 0}, {"expected_status_max", "INTEGER", false, 0}, {"follow_redirects", "INTEGER", false, 0},
+			{"max_redirects", "INTEGER", false, 0}, {"enabled", "INTEGER", true, 0}, {"observed_state", "TEXT", true, 0},
+			{"last_attempt_at", "TEXT", false, 0}, {"last_result_at", "TEXT", false, 0}, {"freshness_deadline_at", "TEXT", false, 0},
+			{"consecutive_failures", "INTEGER", true, 0}, {"last_latency_ms", "INTEGER", false, 0}, {"last_error_code", "TEXT", false, 0},
+			{"last_http_status", "INTEGER", false, 0}, {"archived_at", "TEXT", false, 0}, {"created_at", "TEXT", true, 0},
+			{"updated_at", "TEXT", true, 0}, {"configuration_generation", "INTEGER", true, 0}, {"version", "INTEGER", true, 0},
+		}},
+		{"check_results", []expectedColumn{
+			{"check_id", "TEXT", true, 0}, {"slot_id", "TEXT", true, 0}, {"received_at", "TEXT", true, 0},
+			{"status", "TEXT", true, 0}, {"latency_ms", "INTEGER", false, 0}, {"error_code", "TEXT", false, 0}, {"http_status", "INTEGER", false, 0},
+		}},
+		{"check_hourly_rollups", []expectedColumn{
+			{"check_id", "TEXT", true, 1}, {"metric_key", "TEXT", true, 2}, {"bucket_start", "TEXT", true, 3},
+			{"bucket_end", "TEXT", true, 0}, {"min_value", "REAL", true, 0}, {"max_value", "REAL", true, 0},
+			{"average_value", "REAL", true, 0}, {"sample_count", "INTEGER", true, 0}, {"successful_count", "INTEGER", false, 0},
+			{"expected_sample_count", "INTEGER", false, 0}, {"covered_slot_count", "INTEGER", false, 0}, {"complete", "INTEGER", true, 0}, {"updated_at", "TEXT", true, 0},
+		}},
+		{"check_runs", []expectedColumn{
+			{"id", "TEXT", true, 1}, {"check_id", "TEXT", true, 0}, {"request_id", "TEXT", true, 0}, {"state", "TEXT", true, 0},
+			{"requested_at", "TEXT", true, 0}, {"started_at", "TEXT", false, 0}, {"completed_at", "TEXT", false, 0}, {"lease_until", "TEXT", false, 0},
+			{"process_attempts", "INTEGER", true, 0}, {"snapshot_type", "TEXT", true, 0}, {"snapshot_url", "TEXT", false, 0}, {"snapshot_host", "TEXT", false, 0},
+			{"snapshot_port", "INTEGER", false, 0}, {"snapshot_interval_seconds", "INTEGER", true, 0}, {"snapshot_timeout_seconds", "INTEGER", true, 0},
+			{"snapshot_expected_status_min", "INTEGER", false, 0}, {"snapshot_expected_status_max", "INTEGER", false, 0}, {"snapshot_follow_redirects", "INTEGER", false, 0}, {"snapshot_max_redirects", "INTEGER", false, 0},
+			{"result_status", "TEXT", false, 0}, {"result_latency_ms", "INTEGER", false, 0}, {"result_error_code", "TEXT", false, 0}, {"result_http_status", "INTEGER", false, 0}, {"failure_code", "TEXT", false, 0},
+		}},
+		{"check_settings", []expectedColumn{
+			{"id", "INTEGER", false, 1}, {"interval_seconds", "INTEGER", true, 0}, {"timeout_seconds", "INTEGER", true, 0}, {"allowed_private_cidrs", "TEXT", true, 0}, {"updated_at", "TEXT", true, 0},
+		}},
+	} {
+		if err := validateTable(ctx, query, table.name, table.columns); err != nil {
+			return corruptQueryError(ctx, "invalid "+table.name+" table", err)
+		}
+	}
+	return validateMigrationObjects(ctx, query, checksMigrationSQL)
+}
+
 func validateMetricTables(ctx context.Context, query queryer, extendedProgress bool) error {
 	retentionProgress := []expectedColumn{
 		{"id", "INTEGER", false, 1}, {"last_rollup_bucket_start", "TEXT", false, 0},

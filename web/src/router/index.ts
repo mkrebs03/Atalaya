@@ -2,6 +2,8 @@ import { createRouter, createWebHistory, type RouterHistory, type RouteRecordRaw
 import { auth } from '@/auth/useAuth'
 import AuthenticatedLayout from '@/layouts/AuthenticatedLayout.vue'
 import AccountView from '@/views/AccountView.vue'
+import CheckDetailView from '@/views/CheckDetailView.vue'
+import ChecksView from '@/views/ChecksView.vue'
 import HomeView from '@/views/HomeView.vue'
 import HostDetailView from '@/views/HostDetailView.vue'
 import HostManagementView from '@/views/HostManagementView.vue'
@@ -18,6 +20,8 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', name: 'home', component: HomeView },
       { path: 'hosts/:id', name: 'host-detail', component: HostDetailView },
+      { path: 'checks', name: 'checks', component: ChecksView },
+      { path: 'checks/:id', name: 'check-detail', component: CheckDetailView },
       { path: 'manage', name: 'host-management', component: HostManagementView },
       { path: 'account', name: 'account', component: AccountView },
       { path: 'settings', name: 'settings', component: SettingsView },
