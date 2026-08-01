@@ -77,6 +77,35 @@ export interface Filesystem {
   version: number
 }
 
+export type MetricsResolution = 'auto' | 'raw' | 'hourly' | 'mixed'
+
+export interface MetricPoint {
+  timestamp: string
+  resolution: Exclude<MetricsResolution, 'auto'>
+  value: number
+  min: number
+  max: number
+  sample_count: number
+  covered_slot_count?: number
+  expected_sample_count?: number
+  complete?: boolean
+}
+
+export interface MetricSeries {
+  key: string
+  unit: 'percent' | 'bytes'
+  filesystem_id?: string
+  mount_point?: string
+  points: MetricPoint[]
+}
+
+export interface HostMetrics {
+  from: string
+  to: string
+  resolution: MetricsResolution
+  series: MetricSeries[]
+}
+
 interface Page<T> {
   items: T[]
   next_cursor: string | null
@@ -124,4 +153,22 @@ export function listAllHostsIncludingArchived(signal?: AbortSignal) {
 
 export function listAllFilesystems(id: string, signal?: AbortSignal) {
   return collectPages((cursor) => listFilesystems(id, signal, cursor))
+}
+
+export function getHostMetrics(
+  id: string,
+  from: Date,
+  to: Date,
+  resolution: Exclude<MetricsResolution, 'mixed'> = 'auto',
+  signal?: AbortSignal,
+) {
+  const query = new URLSearchParams({
+    from: from.toISOString(),
+    to: to.toISOString(),
+    resolution,
+  })
+  return getJSON<HostMetrics>(
+    `/api/v1/hosts/${encodeURIComponent(id)}/metrics?${query.toString()}`,
+    { signal },
+  )
 }

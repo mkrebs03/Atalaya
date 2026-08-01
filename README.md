@@ -1,10 +1,10 @@
 # Atalaya
 
 Atalaya es un dashboard personal para observar hosts Linux y servicios self-hosted
-dentro de una red Tailscale. Tras completar persistencia y autenticacion, la Fase 2
-agrega el agente local de Oracle, enrolamiento remoto, scheduling persistente y vistas
-de estado actual/gestion. El alcance exacto de cada slice permanece definido por la
-documentacion.
+dentro de una red Tailscale. Tras completar persistencia, autenticacion y la Fase 2,
+la Fase 3 agrega series historicas, rollups horarios, retencion configurable y
+graficos con huecos explicitos. El alcance exacto de cada slice permanece definido por
+la documentacion.
 
 El producto completo sigue el contrato de [`spec.md`](spec.md). El indice y la
 precedencia de decisiones tecnicas estan en [`docs/README.md`](docs/README.md).

@@ -162,6 +162,9 @@ func (database *Database) Finish(ctx context.Context, claim collection.Claim, re
 	if err = persistSnapshot(ctx, tx, claim.HostID, *result.Snapshot, result.ReceivedAt, random); err != nil {
 		return err
 	}
+	if err = persistMetricSamples(ctx, tx, claim.HostID, claim.SlotID, *result.Snapshot, result.ReceivedAt); err != nil {
+		return err
+	}
 	observed, _ := time.Parse(time.RFC3339Nano, result.Snapshot.Host.ObservedAt)
 	degraded := len(result.Snapshot.CollectionWarnings) > 0 || result.Snapshot.Tailscale.State != "connected" || absDuration(observed.Sub(result.ReceivedAt)) > 5*time.Minute
 	observedState := "healthy"
@@ -264,6 +267,65 @@ func persistSnapshot(ctx context.Context, tx *sql.Tx, hostID string, snapshot ag
 		_, err = tx.ExecContext(ctx, `INSERT INTO filesystems(id,host_id,identity_kind,identity_key,fs_uuid,mount_root,mount_point,major_minor,fs_type,device,total_bytes,used_bytes,available_bytes,discovered_at,selected,present,last_observed_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1,?,1) ON CONFLICT(host_id,identity_kind,identity_key) DO UPDATE SET fs_uuid=excluded.fs_uuid,mount_root=excluded.mount_root,mount_point=excluded.mount_point,major_minor=excluded.major_minor,fs_type=excluded.fs_type,device=excluded.device,total_bytes=excluded.total_bytes,used_bytes=excluded.used_bytes,available_bytes=excluded.available_bytes,present=1,last_observed_at=excluded.last_observed_at,version=filesystems.version+1`, filesystemID, hostID, string(kind), identity, filesystem.FSUUID, filesystem.MountRoot, filesystem.MountPoint, filesystem.MajorMinor, filesystem.FSType, filesystem.Device, int64(filesystem.TotalBytes), int64(filesystem.UsedBytes), int64(filesystem.AvailableBytes), dbTime(received), dbTime(received))
 		if err != nil {
 			return fmt.Errorf("store filesystem: %w", err)
+		}
+	}
+	return nil
+}
+
+func persistMetricSamples(ctx context.Context, tx *sql.Tx, hostID, slotID string, snapshot agent.Snapshot, received time.Time) error {
+	insertReal := func(scopeID, metric string, value float64) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO metric_samples(host_id,scope_id,metric_key,slot_id,received_at,value_real) VALUES(?,?,?,?,?,?) ON CONFLICT(scope_id,metric_key,slot_id) DO NOTHING`, hostID, scopeID, metric, slotID, dbTime(received), value)
+		return err
+	}
+	insertInteger := func(scopeID, metric string, value uint64) error {
+		if value > math.MaxInt64 {
+			return fmt.Errorf("metric integer exceeds storage range")
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO metric_samples(host_id,scope_id,metric_key,slot_id,received_at,value_integer) VALUES(?,?,?,?,?,?) ON CONFLICT(scope_id,metric_key,slot_id) DO NOTHING`, hostID, scopeID, metric, slotID, dbTime(received), int64(value))
+		return err
+	}
+	if snapshot.Host.CPUUsedPercent != nil {
+		if err := insertReal(hostID, "cpu_used_percent", *snapshot.Host.CPUUsedPercent); err != nil {
+			return fmt.Errorf("store CPU metric sample: %w", err)
+		}
+	}
+	if snapshot.Host.MemoryUsedBytes != nil {
+		if err := insertInteger(hostID, "memory_used_bytes", *snapshot.Host.MemoryUsedBytes); err != nil {
+			return fmt.Errorf("store memory used metric sample: %w", err)
+		}
+	}
+	if snapshot.Host.MemoryTotalBytes != nil {
+		if err := insertInteger(hostID, "memory_total_bytes", *snapshot.Host.MemoryTotalBytes); err != nil {
+			return fmt.Errorf("store memory total metric sample: %w", err)
+		}
+	}
+	for _, filesystem := range snapshot.Filesystems {
+		kind := hosts.IdentityFallback
+		first := filesystem.Device
+		if filesystem.FSUUID != nil {
+			kind = hosts.IdentityUUID
+			first = *filesystem.FSUUID
+		}
+		identity, err := hosts.EncodeIdentityV1(kind, first, filesystem.MountRoot, filesystem.MountPoint)
+		if err != nil {
+			return err
+		}
+		var filesystemID string
+		var selected int
+		if err := tx.QueryRowContext(ctx, `SELECT id,selected FROM filesystems WHERE host_id=? AND identity_kind=? AND identity_key=?`, hostID, string(kind), identity).Scan(&filesystemID, &selected); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return fmt.Errorf("find filesystem metric scope: %w", err)
+		}
+		if selected == 0 {
+			continue
+		}
+		if err := insertInteger(filesystemID, "filesystem_used_bytes", filesystem.UsedBytes); err != nil {
+			return fmt.Errorf("store filesystem used metric sample: %w", err)
+		}
+		if err := insertInteger(filesystemID, "filesystem_total_bytes", filesystem.TotalBytes); err != nil {
+			return fmt.Errorf("store filesystem total metric sample: %w", err)
 		}
 	}
 	return nil

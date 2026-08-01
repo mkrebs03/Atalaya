@@ -392,6 +392,17 @@ fuentes. Si cualquier serie lo supera, la consulta completa responde `422` con c
 `point_limit_exceeded`; no devuelve una respuesta truncada. El cliente debe acotar el
 rango o solicitar `hourly`.
 
+Para mantener acotado el trabajo de SQLite, una consulta `hourly` o `auto` que requiera
+demasiadas evaluaciones de buckets tambien responde `422 point_limit_exceeded`, aunque
+no existan muestras en la ventana. El cliente debe reducir el rango; solicitar
+`hourly` sigue siendo el fallback para una consulta `auto` densa, pero ese fallback
+tambien respeta el limite de trabajo del servidor.
+
+Las series de host usan las claves `cpu_used_percent`, `memory_used_bytes` y
+`memory_total_bytes`. Las series de filesystem usan `filesystem_used_bytes` y
+`filesystem_total_bytes`, e incluyen `filesystem_id` y `mount_point`. Solo filesystems
+seleccionados generan nuevas muestras; un filesystem ausente conserva su historico.
+
 ## 5. Checks
 
 - `GET /api/v1/checks`
@@ -607,6 +618,22 @@ Rangos:
 - Retencion rollup: 7 a 730 dias y no menor que retencion raw despues de convertir
   ambas duraciones a segundos. Por tanto, si raw supera 7 dias, el minimo efectivo de
   rollup pasa a ser el valor de raw.
+
+La Fase 3 expone inicialmente la parte de retencion del recurso singleton:
+
+```json
+{
+  "raw_retention_seconds": 172800,
+  "rollup_retention_seconds": 7776000,
+  "updated_at": "RFC3339",
+  "version": 1
+}
+```
+
+`GET /api/v1/settings` devuelve este objeto y su ETag. `PATCH` acepta uno o ambos
+campos, exige sesion, CSRF e `If-Match`, y devuelve el objeto actualizado. Reducir una
+retencion aplica en el siguiente ciclo y puede eliminar datos de forma irreversible;
+aumentarla no recupera muestras ya eliminadas.
 
 Intervalos nuevos aplican al primer slot que se cree despues del cambio. Cada slot
 conserva intervalo y timeout efectivos; el cambio no modifica slots ni deadlines ya

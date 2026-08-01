@@ -25,6 +25,8 @@ import (
 	"github.com/mkrebs03/atalaya/internal/hostquery"
 	"github.com/mkrebs03/atalaya/internal/hosts"
 	"github.com/mkrebs03/atalaya/internal/httpapi"
+	metricdomain "github.com/mkrebs03/atalaya/internal/metrics"
+	"github.com/mkrebs03/atalaya/internal/retention"
 	"github.com/mkrebs03/atalaya/internal/server"
 )
 
@@ -78,7 +80,15 @@ func New(assets fs.FS) (Application, error) {
 			if err != nil {
 				return err
 			}
-			return (collection.Scheduler{Repository: repository, Puller: client}).Run(ctx)
+			scheduler := func(runContext context.Context) error {
+				return (collection.Scheduler{Repository: repository, Puller: client}).Run(runContext)
+			}
+			jobs := []func(context.Context) error{scheduler}
+			if retentionRepository, ok := repository.(metricdomain.RetentionRepository); ok {
+				worker := retention.Worker{Repository: retentionRepository}
+				jobs = append(jobs, worker.Run)
+			}
+			return runConcurrentJobs(ctx, jobs...)
 		},
 		newHandler: func() (http.Handler, error) {
 			return httpapi.New(assets)
@@ -96,6 +106,27 @@ func New(assets fs.FS) (Application, error) {
 		hashPassword: auth.HashPassword,
 		random:       rand.Reader,
 	}, nil
+}
+
+func runConcurrentJobs(ctx context.Context, jobs ...func(context.Context) error) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	coordinated, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errorsChannel := make(chan error, len(jobs))
+	for _, job := range jobs {
+		go func(run func(context.Context) error) { errorsChannel <- run(coordinated) }(job)
+	}
+	var firstErr error
+	for range jobs {
+		err := <-errorsChannel
+		if err != nil && !errors.Is(err, context.Canceled) && firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+	}
+	return firstErr
 }
 
 // Run executes one CLI invocation and returns its process exit code.

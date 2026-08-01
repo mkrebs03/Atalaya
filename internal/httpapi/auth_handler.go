@@ -21,6 +21,7 @@ import (
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	"github.com/mkrebs03/atalaya/internal/hostquery"
 	"github.com/mkrebs03/atalaya/internal/hosts"
+	"github.com/mkrebs03/atalaya/internal/metrics"
 )
 
 const sessionCookie = "atalaya_session"
@@ -45,6 +46,7 @@ type authAPI struct {
 	config     AuthConfig
 	hosts      hostquery.Repository
 	management hosts.ManagementRepository
+	metrics    metrics.Repository
 }
 
 func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, hostRepositories ...hostquery.Repository) (http.Handler, error) {
@@ -78,6 +80,9 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		api.hosts = hostRepositories[0]
 		if management, ok := hostRepositories[0].(hosts.ManagementRepository); ok {
 			api.management = management
+		}
+		if repository, ok := hostRepositories[0].(metrics.Repository); ok {
+			api.metrics = repository
 		}
 	}
 	mux := http.NewServeMux()
@@ -113,6 +118,10 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		mux.HandleFunc("HEAD /api/v1/hosts/{id}/filesystems", api.hostsMethodNotAllowed)
 		mux.HandleFunc("/api/v1/hosts/{id}", api.methodNotAllowed)
 		mux.HandleFunc("/api/v1/hosts/{id}/filesystems", api.methodNotAllowed)
+		if api.metrics != nil {
+			mux.HandleFunc("GET /api/v1/hosts/{id}/metrics", api.getHostMetrics)
+			mux.HandleFunc("/api/v1/hosts/{id}/metrics", api.methodNotAllowed)
+		}
 	}
 	if api.management != nil {
 		mux.HandleFunc("POST /api/v1/enrollment-tokens", api.createEnrollmentToken)
@@ -120,6 +129,11 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		mux.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", api.revokeEnrollmentToken)
 		mux.HandleFunc("/api/v1/enrollment-tokens", api.methodNotAllowed)
 		mux.HandleFunc("/api/v1/enrollment-tokens/{id}", api.methodNotAllowed)
+	}
+	if api.metrics != nil {
+		mux.HandleFunc("GET /api/v1/settings", api.getSettings)
+		mux.HandleFunc("PATCH /api/v1/settings", api.patchSettings)
+		mux.HandleFunc("/api/v1/settings", api.methodNotAllowed)
 	}
 	mux.HandleFunc("/api", api.notFound)
 	mux.HandleFunc("/api/", api.notFound)

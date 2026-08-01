@@ -67,4 +67,49 @@ describe('HostDetailView resource cache', () => {
     expect(bRequest?.etag).toBeNull()
     wrapper.unmount()
   })
+
+  it('falls back to hourly metrics when auto resolution exceeds the point limit', async () => {
+    const metricRequests: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        if (input.includes('/metrics')) {
+          metricRequests.push(input)
+          if (metricRequests.length === 1)
+            return new Response(JSON.stringify({ error: { code: 'point_limit_exceeded' } }), {
+              status: 422,
+            })
+          return new Response(
+            JSON.stringify({
+              from: '2026-07-31T00:00:00Z',
+              to: '2026-08-01T00:00:00Z',
+              resolution: 'hourly',
+              series: [],
+            }),
+            { status: 200 },
+          )
+        }
+        if (input.includes('/filesystems'))
+          return new Response(JSON.stringify({ items: [], next_cursor: null }), { status: 200 })
+        return new Response(JSON.stringify(detail('a')), { status: 200, headers: { ETag: '"1"' } })
+      }),
+    )
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/hosts/:id', name: 'host-detail', component: HostDetailView },
+      ],
+    })
+    await router.push('/hosts/a')
+    await router.isReady()
+    const wrapper = mount(HostDetailView, { global: { plugins: [router] } })
+    await flushPromises()
+
+    expect(metricRequests).toHaveLength(2)
+    expect(metricRequests[0]).toContain('resolution=auto')
+    expect(metricRequests[1]).toContain('resolution=hourly')
+    expect(wrapper.text()).toContain('Resolución recibida: hourly')
+    wrapper.unmount()
+  })
 })

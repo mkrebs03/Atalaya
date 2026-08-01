@@ -142,12 +142,16 @@ func TestProtocolFailureLeavesCurrentSnapshotAndFilesystemsIntact(t *testing.T) 
 	}
 	var receivedBefore string
 	var filesystemVersionBefore int
+	var metricSamplesBefore int
 	var observedBefore, successBefore, attemptBefore string
 	var hostVersionBefore, failuresBefore int
 	if err = db.sql.QueryRow(`SELECT received_at FROM host_snapshots WHERE host_id=?`, host.ID).Scan(&receivedBefore); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.sql.QueryRow(`SELECT version FROM filesystems WHERE host_id=?`, host.ID).Scan(&filesystemVersionBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.sql.QueryRow(`SELECT count(*) FROM metric_samples WHERE host_id=?`, host.ID).Scan(&metricSamplesBefore); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.sql.QueryRow(`SELECT observed_state,version,consecutive_failures,COALESCE(last_success_received_at,''),COALESCE(last_attempt_at,'') FROM hosts WHERE id=?`, host.ID).Scan(&observedBefore, &hostVersionBefore, &failuresBefore, &successBefore, &attemptBefore); err != nil {
@@ -184,6 +188,7 @@ func TestProtocolFailureLeavesCurrentSnapshotAndFilesystemsIntact(t *testing.T) 
 	}
 	var receivedAfter string
 	var filesystemVersionAfter int
+	var metricSamplesAfter int
 	var observedAfter, successAfter, attemptAfter string
 	var hostVersionAfter, failuresAfter int
 	if err = db.sql.QueryRow(`SELECT received_at FROM host_snapshots WHERE host_id=?`, host.ID).Scan(&receivedAfter); err != nil {
@@ -192,11 +197,14 @@ func TestProtocolFailureLeavesCurrentSnapshotAndFilesystemsIntact(t *testing.T) 
 	if err = db.sql.QueryRow(`SELECT version FROM filesystems WHERE host_id=?`, host.ID).Scan(&filesystemVersionAfter); err != nil {
 		t.Fatal(err)
 	}
+	if err = db.sql.QueryRow(`SELECT count(*) FROM metric_samples WHERE host_id=?`, host.ID).Scan(&metricSamplesAfter); err != nil {
+		t.Fatal(err)
+	}
 	if err = db.sql.QueryRow(`SELECT observed_state,version,consecutive_failures,COALESCE(last_success_received_at,''),COALESCE(last_attempt_at,'') FROM hosts WHERE id=?`, host.ID).Scan(&observedAfter, &hostVersionAfter, &failuresAfter, &successAfter, &attemptAfter); err != nil {
 		t.Fatal(err)
 	}
-	if receivedAfter != receivedBefore || filesystemVersionAfter != filesystemVersionBefore || observedAfter != observedBefore || hostVersionAfter != hostVersionBefore || failuresAfter != failuresBefore || successAfter != successBefore || attemptAfter != attemptBefore {
-		t.Fatalf("current state mutated: snapshot %q->%q fs=%d->%d observed=%s->%s host_version=%d->%d failures=%d->%d success=%q->%q attempt=%q->%q", receivedBefore, receivedAfter, filesystemVersionBefore, filesystemVersionAfter, observedBefore, observedAfter, hostVersionBefore, hostVersionAfter, failuresBefore, failuresAfter, successBefore, successAfter, attemptBefore, attemptAfter)
+	if receivedAfter != receivedBefore || filesystemVersionAfter != filesystemVersionBefore || metricSamplesAfter != metricSamplesBefore || observedAfter != observedBefore || hostVersionAfter != hostVersionBefore || failuresAfter != failuresBefore || successAfter != successBefore || attemptAfter != attemptBefore {
+		t.Fatalf("current state mutated: snapshot %q->%q fs=%d->%d metric_samples=%d->%d observed=%s->%s host_version=%d->%d failures=%d->%d success=%q->%q attempt=%q->%q", receivedBefore, receivedAfter, filesystemVersionBefore, filesystemVersionAfter, metricSamplesBefore, metricSamplesAfter, observedBefore, observedAfter, hostVersionBefore, hostVersionAfter, failuresBefore, failuresAfter, successBefore, successAfter, attemptBefore, attemptAfter)
 	}
 }
 

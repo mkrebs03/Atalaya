@@ -135,17 +135,91 @@ func validateSchemaV4(ctx context.Context, query queryer) error {
 	return validateMigrationObjects(ctx, query, enrollmentMigrationSQL)
 }
 
+func validateSchemaV5(ctx context.Context, query queryer) error {
+	if err := validateSchemaV4(ctx, query); err != nil {
+		return err
+	}
+	if err := validateMetricTables(ctx, query, false); err != nil {
+		return corruptQueryError(ctx, "invalid metrics table", err)
+	}
+	return validateMigrationObjects(ctx, query, metricsMigrationSQL)
+}
+
+func validateSchemaV6(ctx context.Context, query queryer) error {
+	if err := validateSchemaV4(ctx, query); err != nil {
+		return err
+	}
+	if err := validateMetricTables(ctx, query, true); err != nil {
+		return corruptQueryError(ctx, "invalid metrics table", err)
+	}
+	if err := validateMigrationObjectsExcept(ctx, query, metricsMigrationSQL, map[string]bool{"retention_progress": true}); err != nil {
+		return err
+	}
+	return validateMigrationObjects(ctx, query, retentionProgressMigrationSQL)
+}
+
+func validateMetricTables(ctx context.Context, query queryer, extendedProgress bool) error {
+	retentionProgress := []expectedColumn{
+		{"id", "INTEGER", false, 1}, {"last_rollup_bucket_start", "TEXT", false, 0},
+		{"last_raw_cleanup_at", "TEXT", false, 0}, {"updated_at", "TEXT", true, 0},
+	}
+	if extendedProgress {
+		retentionProgress = append(retentionProgress,
+			expectedColumn{"last_raw_retention_seconds", "INTEGER", false, 0},
+			expectedColumn{"last_rollup_retention_seconds", "INTEGER", false, 0},
+		)
+	}
+	for _, table := range []struct {
+		name    string
+		columns []expectedColumn
+	}{
+		{"metric_samples", []expectedColumn{
+			{"host_id", "TEXT", true, 0}, {"scope_id", "TEXT", true, 0}, {"filesystem_id", "TEXT", false, 0},
+			{"metric_key", "TEXT", true, 0}, {"slot_id", "TEXT", true, 0},
+			{"received_at", "TEXT", true, 0}, {"value_real", "REAL", false, 0},
+			{"value_integer", "INTEGER", false, 0},
+		}},
+		{"hourly_rollups", []expectedColumn{
+			{"host_id", "TEXT", true, 0}, {"scope_id", "TEXT", true, 1}, {"filesystem_id", "TEXT", false, 0},
+			{"metric_key", "TEXT", true, 2}, {"bucket_start", "TEXT", true, 3},
+			{"bucket_end", "TEXT", true, 0}, {"min_value", "REAL", true, 0},
+			{"max_value", "REAL", true, 0}, {"average_value", "REAL", true, 0},
+			{"sample_count", "INTEGER", true, 0}, {"expected_sample_count", "INTEGER", false, 0},
+			{"covered_slot_count", "INTEGER", false, 0}, {"complete", "INTEGER", true, 0},
+			{"updated_at", "TEXT", true, 0},
+		}},
+		{"retention_settings", []expectedColumn{
+			{"id", "INTEGER", false, 1}, {"raw_retention_seconds", "INTEGER", true, 0},
+			{"rollup_retention_seconds", "INTEGER", true, 0}, {"updated_at", "TEXT", true, 0},
+			{"version", "INTEGER", true, 0},
+		}},
+		{"retention_progress", retentionProgress},
+	} {
+		if err := validateTable(ctx, query, table.name, table.columns); err != nil {
+			return fmt.Errorf("invalid %s table: %w", table.name, err)
+		}
+	}
+	return nil
+}
+
 // validateMigrationObjects compares every explicit CREATE statement with SQLite's
 // normalized schema text. This detects weakened CHECK, FK, partial-index, and unique
 // definitions that column metadata alone cannot see.
 func validateMigrationObjects(ctx context.Context, query queryer, source string) error {
+	return validateMigrationObjectsExcept(ctx, query, source, nil)
+}
+
+func validateMigrationObjectsExcept(ctx context.Context, query queryer, source string, skipped map[string]bool) error {
 	for _, statement := range splitCreateStatements(source) {
 		if statement == "" {
 			continue
 		}
 		fields := strings.Fields(statement)
-		if len(fields) < 3 || fields[0] != "CREATE" {
-			return corruptError("host migration contains an unexpected statement", nil)
+		if len(fields) == 0 || fields[0] != "CREATE" {
+			continue
+		}
+		if len(fields) < 3 {
+			return corruptError("migration contains an invalid CREATE statement", nil)
 		}
 		kindIndex := 1
 		if fields[kindIndex] == "UNIQUE" {
@@ -155,6 +229,9 @@ func validateMigrationObjects(ctx context.Context, query queryer, source string)
 			return corruptError("host migration contains an invalid CREATE statement", nil)
 		}
 		kind, name := strings.ToLower(fields[kindIndex]), fields[kindIndex+1]
+		if skipped != nil && skipped[name] {
+			continue
+		}
 		var actual string
 		if err := query.QueryRowContext(ctx, "SELECT sql FROM sqlite_schema WHERE type=? AND name=?", kind, name).Scan(&actual); err != nil {
 			return corruptQueryError(ctx, "missing host schema object "+name, err)

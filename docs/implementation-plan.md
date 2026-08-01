@@ -245,6 +245,8 @@ Trabajo:
 - Rechazar `raw` fuera de retencion con `raw_not_available` y calcular hourly en
   lectura para horas abiertas o aun no agregadas que conservan raw.
 - Definir buckets horarios semiabiertos, cobertura y limite de 10000 puntos por serie.
+- Acotar el trabajo de consultas `hourly`/`auto` antes de iterar buckets, incluso cuando
+  la ventana no contiene muestras.
 - Consumir los periodos de schedule para calcular cobertura cuando cambia el intervalo.
 - Separar agregacion por `received_at` de cobertura por slot nominal y `slot_id`; no
   inferir `complete` comparando `sample_count` con expected.
@@ -254,6 +256,8 @@ Trabajo:
 - Integrar `uPlot` mediante componente Vue con teardown correcto.
 - Mostrar rangos 24h, 7d, 30d y 90d.
 - Mostrar huecos sin interpolacion engañosa.
+- Persistir y editar desde UI la retencion raw/rollup mediante el recurso singleton de
+  settings; la mutacion usa version/ETag y CSRF.
 
 Condiciones de salida:
 

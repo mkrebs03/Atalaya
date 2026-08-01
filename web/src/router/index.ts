@@ -7,6 +7,7 @@ import HostDetailView from '@/views/HostDetailView.vue'
 import HostManagementView from '@/views/HostManagementView.vue'
 import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
+import SettingsView from '@/views/SettingsView.vue'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
@@ -19,6 +20,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'hosts/:id', name: 'host-detail', component: HostDetailView },
       { path: 'manage', name: 'host-management', component: HostManagementView },
       { path: 'account', name: 'account', component: AccountView },
+      { path: 'settings', name: 'settings', component: SettingsView },
       { path: ':pathMatch(.*)*', name: 'not-found', component: NotFoundView },
     ],
   },

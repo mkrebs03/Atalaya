@@ -263,6 +263,11 @@ Series crudas separan dimensiones para consultas acotadas:
 No guardar blobs JSON completos como unica fuente historica. Snapshot original puede
 registrarse temporalmente en debug, nunca requerido para consultas.
 
+La muestra normalizada conserva `host_id`, alcance de host o filesystem, clave de
+serie, `slot_id`, `received_at` y un valor real o entero. La unicidad por alcance,
+clave y slot hace idempotente la finalizacion de un pull. Los bytes raw conservan
+precision entera; las agregaciones horarias exponen min/max/promedio numericos.
+
 ### HourlyRollup
 
 Por hora UTC y serie:
