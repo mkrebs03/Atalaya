@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  tailscale-compatibility:
+    name: Tailscale Serve compatibility (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # These are the oldest and newest release endpoints of the supported
+        # range. The adapter's semver matrix covers versions between them.
+        version: ["1.52.0", "1.99.0"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache-dependency-path: go.sum
+      - name: Install Tailscale CLI ${{ matrix.version }}
+        env:
+          TAILSCALE_VERSION: ${{ matrix.version }}
+        run: |
+          archive="$RUNNER_TEMP/tailscale-${TAILSCALE_VERSION}.tgz"
+          directory="$RUNNER_TEMP/tailscale-${TAILSCALE_VERSION}"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_amd64.tgz" \
+            --output "$archive"
+          mkdir -p "$directory"
+          tar -xzf "$archive" -C "$directory"
+          tailscale_binary="$(find "$directory" -type f -name tailscale -perm -u+x -print -quit)"
+          test -n "$tailscale_binary"
+          echo "ATALAYA_TAILSCALE_BIN=$tailscale_binary" >> "$GITHUB_ENV"
+          "$tailscale_binary" version
+      - name: Exercise Serve adapter
+        run: CGO_ENABLED=0 go test ./internal/tailscale -run '^TestServeCompatibilityWithInstalledBinary$' -count=1
+
+  release:
+    needs: tailscale-compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify pinned toolchain
+        run: |
+          test "$(go env GOVERSION)" = "go1.26.5"
+          test "$(node --version)" = "v24.18.0"
+          test "$(npm --version)" = "11.16.0"
+      - name: Build release artifacts
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          make build VERSION="${RELEASE_VERSION#v}"
+          mkdir -p build/release
+          cp build/atalaya-linux-amd64 build/release/
+          cp build/atalaya-linux-arm64 build/release/
+          cp scripts/install.sh build/release/install.sh
+          chmod 0755 build/release/install.sh
+          cd build/release
+          sha256sum atalaya-linux-amd64 atalaya-linux-arm64 install.sh > SHA256SUMS
+          cat > RELEASE-NOTES.md <<EOF
+          ## Atalaya ${RELEASE_VERSION}
+
+          Linux artifacts are provided for amd64 and arm64 with SHA-256 checksums.
+          The installer requires systemd and an authenticated Tailscale connection.
+          This release gates the Tailscale Serve adapter against 1.52.0 and 1.99.0,
+          the oldest and newest compatibility endpoints;
+          it configures HTTPS 443 -> 127.0.0.1:8080 and HTTPS 9474 -> 127.0.0.1:9474.
+          EOF
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" build/release/atalaya-linux-amd64 build/release/atalaya-linux-arm64 build/release/install.sh build/release/SHA256SUMS --title "Atalaya ${{ github.ref_name }}" --notes-file build/release/RELEASE-NOTES.md

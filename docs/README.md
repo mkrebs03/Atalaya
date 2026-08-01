@@ -115,6 +115,15 @@ Decisiones cerradas:
 - Respuestas de metricas declaran resolucion por punto, usan `mixed` al combinar
   fuentes y limitan a 10000 puntos por serie con `422`.
 - Backups de datos excluyen la clave maestra; su exportacion y custodia son separadas.
+- Fase 6 usa VACUUM INTO para backups consistentes, verify es solo lectura y la
+  restauracion offline sigue migrate -> verify -> start.
+- Releases publicas se distribuyen mediante GitHub Releases con binarios Linux
+  amd64/arm64, SHA256SUMS obligatorio y scripts/install.sh.
+- El instalador instala systemd generico, conserva configuracion/secretos validos,
+  y el rollback mantiene binario y snapshot pre-migracion hasta pasar healthchecks.
+- Tailscale Serve se valida por capacidades observadas para las rutas del rol: server
+  publica HTTPS 443 y 9474, agent-only publica 9474; no se ejecuta tailscale serve reset
+  ni se abre un listener publico como fallback.
 - Toolchain de build fijado por archivos de version y lockfiles.
 
 No decidido porque no bloquea inicio:

@@ -133,16 +133,20 @@ explicito vacio. Los errores de parseo no reproducen el valor recibido.
 ### Enrolar un agente remoto
 
 Desde la UI autenticada, crea un token en Gestionar y guárdalo temporalmente en un
-archivo modo `0600`. En el host remoto, con un `agent.yaml` válido, ejecuta:
+archivo modo `0600`. En el host remoto, con un `agent.yaml` válido, ejecuta el
+enrolamiento como el usuario del servicio para que la credencial quede legible por
+`atalaya-agent.service`:
 
 ```bash
-atalaya agent enroll --config /etc/atalaya/agent.yaml --token-file /run/user/$(id -u)/atalaya-token
+sudo -u atalaya -- /usr/local/bin/atalaya agent enroll --config /etc/atalaya/agent.yaml
 ```
 
-El archivo se elimina después de leerlo. Sin `--token-file`, el comando solicita el
-token por prompt. El enrolamiento guarda un estado lateral 0600 para repetir de forma
-segura una respuesta perdida y escribe la credencial sin reemplazar una credencial
-válida existente.
+El comando solicita el token por prompt. Si se usa `--token-file`, el archivo debe ser
+`0600` y legible por `atalaya`; se elimina después de leerlo. El enrolamiento guarda un
+estado lateral 0600 para repetir de forma segura una respuesta perdida y escribe la
+credencial sin reemplazar una credencial válida existente. Si el comando se ejecuta
+como root, el instalador hace un handoff controlado al propietario del directorio de
+estado.
 
 ## Pruebas end-to-end
 
@@ -159,10 +163,9 @@ o falta `node_modules`. Playwright siempre arranca el binario Go host recien con
 desde `build/atalaya`; no reutiliza otro servidor ni usa Vite Preview. Cada ejecucion
 crea config, clave `0600` y DB aisladas bajo `build/e2e`.
 
-## CLI implementada hasta Fase 5
+## CLI implementada hasta Fase 6
 
-`atalaya version` y las ayudas terminan con codigo `0`. Errores operativos y los
-comandos reservados `backup` y `verify` terminan con `1`. Tambien usan `1` una
+`atalaya version` y las ayudas terminan con codigo `0`. Los comandos de operacion terminan con `1`. Tambien usan `1` una
 clave o DB invalida, un fallo de terminal, passwords no coincidentes o un administrador
 activo ya existente. Uso, argumentos, YAML o valores de configuracion invalidos,
 incluidos comando ausente o desconocido, terminan con `2`.
@@ -179,6 +182,10 @@ atalaya agent enroll --config <path> [--display-name <name>] [--token-file <path
 atalaya bootstrap local-agent --server-config <path> --agent-config <path> \
   --agent-url <url> [--display-name <name>] [--listen <addr>] \
   [--credential-path <path>]
+atalaya backup --config <path> --output <path>
+atalaya backup-key --config <path> --output <path> [--yes]
+atalaya verify --config <path>
+atalaya tailscale serve
 ```
 
 Solo `server`, `migrate` y los subcomandos `admin` comparten server config con default
@@ -191,3 +198,37 @@ La UI autenticada permite gestionar tokens, cadencias, estado administrativo y
 filesystems de hosts, checks HTTP/TCP, reglas de alerta, incidentes, canales Discord y
 entregas. Consulta el [plan de implementacion](docs/implementation-plan.md) para el
 alcance y las condiciones de salida.
+
+## Instalacion y operacion en Linux
+
+El instalador publico se obtiene desde GitHub Releases y valida SHA-256 antes de
+instalar el binario. Requiere Linux con systemd y una conexion Tailscale activa; no
+instala esas dependencias silenciosamente.
+
+Instalacion del servidor:
+
+```bash
+curl -fsSL https://github.com/mkrebs03/atalaya/releases/latest/download/install.sh | \
+  sudo sh -s -- server
+```
+
+Instalacion del agente:
+
+```bash
+sudo sh install.sh agent --server-url https://<tailnet-hostname>
+```
+
+Para una release privada u offline usa --artifact-dir con el directorio que contiene
+el binario y SHA256SUMS. --no-start instala archivos y units sin migrar ni iniciar
+servicios. Las operaciones disponibles son:
+
+```bash
+atalaya backup --config /etc/atalaya/server.yaml --output /var/backups/atalaya.tar.gz
+atalaya backup-key --config /etc/atalaya/server.yaml --output /var/backups/master.key --yes
+atalaya verify --config /etc/atalaya/server.yaml
+```
+
+La restauracion offline es controlada: extrae el backup, instala con --no-start,
+ejecuta migrate y verify, y arranca solo despues de ambas verificaciones. Upgrade
+crea un backup pre-migracion y conserva rollback de binario y base de datos hasta que
+los healthchecks del servidor y agente terminan correctamente.

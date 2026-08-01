@@ -171,6 +171,26 @@ test('redirects when host polling discovers an expired session', async ({ page }
   await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible()
 })
 
+test('shows authenticated system status without secrets', async ({ page }) => {
+  await login(page)
+  const statusResponse = page.waitForResponse('**/api/v1/system/status')
+  await page.getByRole('link', { name: 'Sistema' }).click()
+  const response = await statusResponse
+  expect(response.status()).toBe(200)
+  const payload = await response.json()
+  expect(payload).toMatchObject({
+    schema_version: 8,
+    collection: { state: expect.any(String), error_code: expect.any(String) },
+    retention: { state: expect.any(String), error_code: expect.any(String) },
+    checks: { state: expect.any(String), error_code: expect.any(String) },
+    notifications: { state: expect.any(String), error_code: expect.any(String) },
+  })
+  expect(JSON.stringify(payload)).not.toContain(password)
+  await expect(page.getByRole('heading', { name: 'Estado del sistema' })).toBeVisible()
+  await expect(page.getByText('Colección')).toBeVisible()
+  await expect(page.getByText('Notificaciones')).toBeVisible()
+})
+
 test('handles csrf_failed in SPA and fetches a fresh CSRF token', async ({ page }) => {
   let csrfRequests = 0
   let passwordRequests = 0

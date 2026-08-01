@@ -14,8 +14,10 @@ Commands:
   admin    Manage the local administrator
   agent    Start the Atalaya monitoring agent
   bootstrap  Bootstrap local Atalaya resources
-  backup   Reserved for data backup
-  verify   Reserved for installation verification
+  backup   Create a consistent data backup
+  backup-key Export the master key separately
+  verify   Verify configuration, schema, and encrypted secrets
+  tailscale Configure and verify private Serve routes
   version  Print the Atalaya version
   help     Show command help
 `)
@@ -86,8 +88,26 @@ Options:
 `, defaultServerConfigPath)
 }
 
-func writeReservedUsage(output io.Writer, command string) {
-	fmt.Fprintf(output, "Usage: atalaya %s\n\nReserved for a later phase; execution is not implemented yet.\n", command)
+func writeBackupUsage(output io.Writer) {
+	fmt.Fprintf(output, "Usage: atalaya backup [--config <path>] --output <path>\n\nOptions:\n  --config <path>  Server YAML configuration (default %s)\n  --output <path>  New 0600 .tar.gz data backup (must not exist)\n", defaultServerConfigPath)
+}
+
+func writeBackupKeyUsage(output io.Writer) {
+	fmt.Fprintf(output, "Usage: atalaya backup-key [--config <path>] --output <path> [--yes]\n\nOptions:\n  --config <path>  Server YAML configuration (default %s)\n  --output <path>  New 0600 raw master-key export (must not exist)\n  --yes            Confirm export without an interactive prompt\n", defaultServerConfigPath)
+}
+
+func writeVerifyUsage(output io.Writer) {
+	fmt.Fprintf(output, "Usage: atalaya verify [--config <path>]\n\nOptions:\n  --config <path>  Server YAML configuration (default %s)\n", defaultServerConfigPath)
+}
+
+func writeTailscaleUsage(output io.Writer) {
+	fmt.Fprint(output, `Usage: atalaya tailscale serve [options]
+
+Options:
+  --role <both|server|agent>  Routes to configure (default both)
+  --server-config <path>      Server YAML when role is server
+  --agent-config <path>       Agent YAML when role is server or agent
+`)
 }
 
 func writeVersionUsage(output io.Writer) {

@@ -12,6 +12,7 @@ import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
 import NotificationsView from '@/views/NotificationsView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import SystemView from '@/views/SystemView.vue'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
@@ -29,6 +30,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings', name: 'settings', component: SettingsView },
       { path: 'alerts', name: 'alerts', component: AlertsView },
       { path: 'notifications', name: 'notifications', component: NotificationsView },
+      { path: 'system', name: 'system', component: SystemView },
       { path: ':pathMatch(.*)*', name: 'not-found', component: NotFoundView },
     ],
   },

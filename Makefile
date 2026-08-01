@@ -7,7 +7,7 @@ GO_PACKAGES := ./cmd/... ./internal/... ./web
 WEB_DEPS_STAMP := web/node_modules/.atalaya-dependencies
 LDFLAGS := -s -w -X github.com/mkrebs03/atalaya/internal/buildinfo.Version=$(VERSION)
 
-.PHONY: test lint build test-e2e verify-cross-deps install-e2e-browser dev-server web-dev
+.PHONY: test lint build test-e2e verify-cross-deps verify-install install-e2e-browser dev-server web-dev
 
 $(WEB_DEPS_STAMP): web/package.json web/package-lock.json .tool-versions
 	cd web && $(NPM) ci
@@ -29,6 +29,11 @@ lint: $(WEB_DEPS_STAMP)
 	CGO_ENABLED=0 $(GO) vet $(GO_PACKAGES)
 	$(GO) mod tidy -diff
 	$(GO) mod verify
+	$(MAKE) verify-install
+
+verify-install:
+	sh -n scripts/install.sh
+	if command -v systemd-analyze >/dev/null 2>&1; then systemd-analyze verify scripts/systemd/atalaya-server.service scripts/systemd/atalaya-agent.service; fi
 
 build: $(WEB_DEPS_STAMP) verify-cross-deps
 	cd web && $(NPM) run build

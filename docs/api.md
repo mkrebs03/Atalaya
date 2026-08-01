@@ -654,8 +654,26 @@ advertir que es irreversible. CIDRs se expresan en notacion CIDR y no
 pueden incluir rangos siempre bloqueados. Cada ejecucion resuelve DNS y exige que todas
 las IPs resultantes cumplan la politica; redirects HTTP se validan de nuevo.
 
-`system/status` autenticado puede incluir version, estado de jobs, tamano aproximado
-de DB y ultimo backup conocido si instalacion lo registra. No incluye secretos.
+`system/status` autenticado incluye version, estado de jobs, tamano aproximado de DB y
+heartbeats de los subsistemas. No incluye secretos ni mensajes de error crudos.
+
+La respuesta exacta de system/status es:
+
+    {
+      "version": "0.1.0",
+      "schema_version": 8,
+      "database_size_bytes": 123456,
+      "last_heartbeat_at": "RFC3339|null",
+      "collection": {"state": "healthy|degraded|unknown|idle", "error_code": "", "last_heartbeat_at": "RFC3339|null"},
+      "retention": {"state": "healthy|degraded|unknown|idle", "error_code": "", "last_heartbeat_at": "RFC3339|null"},
+      "checks": {"state": "healthy|degraded|unknown|idle", "error_code": "", "last_heartbeat_at": "RFC3339|null"},
+      "notifications": {"state": "healthy|degraded|unknown|idle", "error_code": "", "last_heartbeat_at": "RFC3339|null"}
+    }
+
+El endpoint exige cookie de sesion valida y devuelve 401 sin ella. Todos los
+error_code pertenecen a un conjunto estable: no_targets, no_success, target_unavailable,
+stale, check_failed, not_started, no_checks, no_result, no_channels y delivery_failed. Un fallo interno
+responde code=internal_error y nunca copia el error crudo ni un secreto.
 
 ## 9. Protocolo del agente
 

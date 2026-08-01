@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/mkrebs03/atalaya/internal/agent"
 	"github.com/mkrebs03/atalaya/internal/auth"
+	"github.com/mkrebs03/atalaya/internal/backup"
 	"github.com/mkrebs03/atalaya/internal/buildinfo"
 	"github.com/mkrebs03/atalaya/internal/checks"
 	"github.com/mkrebs03/atalaya/internal/collection"
@@ -30,6 +32,7 @@ import (
 	"github.com/mkrebs03/atalaya/internal/notifications"
 	"github.com/mkrebs03/atalaya/internal/retention"
 	"github.com/mkrebs03/atalaya/internal/server"
+	"github.com/mkrebs03/atalaya/internal/tailscale"
 )
 
 const (
@@ -47,24 +50,30 @@ type databaseHandle interface {
 
 // Application owns CLI dependencies that are replaced by behavior tests.
 type Application struct {
-	version           string
-	newHandler        func() (http.Handler, error)
-	runServer         func(context.Context, server.Config, http.Handler) error
-	loadConfig        func(string) (startupconfig.ServerConfig, error)
-	loadMasterKey     func(string) ([]byte, error)
-	preflightDatabase func(context.Context, string, []byte) (database.PreflightResult, error)
-	openDatabase      func(context.Context, string, []byte) (databaseHandle, error)
-	readPassword      passwordReader
-	hashPassword      passwordHasher
-	assets            fs.FS
-	loadAgentConfig   func(string) (startupconfig.AgentConfig, error)
-	loadCredential    func(string) ([]byte, error)
-	runAgent          func(context.Context, string, http.Handler) error
-	newCollector      func() agent.Collector
-	runCollection     func(context.Context, collection.Repository) error
-	runChecks         func(context.Context, checks.SchedulerRepository, checks.ManualRepository, checks.Executor) error
-	runNotifications  func(context.Context, notifications.Repository) error
-	random            io.Reader
+	version                  string
+	newHandler               func() (http.Handler, error)
+	runServer                func(context.Context, server.Config, http.Handler) error
+	loadConfig               func(string) (startupconfig.ServerConfig, error)
+	loadMasterKey            func(string) ([]byte, error)
+	preflightDatabase        func(context.Context, string, []byte) (database.PreflightResult, error)
+	openDatabase             func(context.Context, string, []byte) (databaseHandle, error)
+	createBackup             func(context.Context, backup.Options) (backup.Manifest, error)
+	verifyDatabase           func(context.Context, string, []byte) (database.Verification, error)
+	exportMasterKey          func(string, string) error
+	confirm                  func(io.Writer) (bool, error)
+	configureTailscale       func(context.Context) (tailscale.Result, error)
+	configureTailscaleRoutes func(context.Context, map[int]string) (tailscale.Result, error)
+	readPassword             passwordReader
+	hashPassword             passwordHasher
+	assets                   fs.FS
+	loadAgentConfig          func(string) (startupconfig.AgentConfig, error)
+	loadCredential           func(string) ([]byte, error)
+	runAgent                 func(context.Context, string, http.Handler) error
+	newCollector             func() agent.Collector
+	runCollection            func(context.Context, collection.Repository) error
+	runChecks                func(context.Context, checks.SchedulerRepository, checks.ManualRepository, checks.Executor) error
+	runNotifications         func(context.Context, notifications.Repository) error
+	random                   io.Reader
 }
 
 // New creates an application backed by the embedded Vue assets.
@@ -110,9 +119,17 @@ func New(assets fs.FS) (Application, error) {
 		newHandler: func() (http.Handler, error) {
 			return httpapi.New(assets)
 		},
-		runServer:         server.Run,
-		loadConfig:        startupconfig.LoadServer,
-		loadMasterKey:     atalayacrypto.LoadMasterKey,
+		runServer:          server.Run,
+		loadConfig:         startupconfig.LoadServer,
+		loadMasterKey:      atalayacrypto.LoadMasterKey,
+		createBackup:       backup.Create,
+		verifyDatabase:     database.Verify,
+		exportMasterKey:    backup.ExportKey,
+		confirm:            func(output io.Writer) (bool, error) { return confirmExport(os.Stdin, output) },
+		configureTailscale: func(ctx context.Context) (tailscale.Result, error) { return tailscale.New().Configure(ctx) },
+		configureTailscaleRoutes: func(ctx context.Context, routes map[int]string) (tailscale.Result, error) {
+			return tailscale.New().ConfigureRoutes(ctx, routes)
+		},
 		preflightDatabase: database.Preflight,
 		openDatabase: func(ctx context.Context, path string, key []byte) (databaseHandle, error) {
 			return database.Open(ctx, path, key)
@@ -168,8 +185,14 @@ func (application Application) Run(args []string, stdout, stderr io.Writer) int 
 		return application.runAgentCommand(args[1:], stdout, stderr)
 	case "bootstrap":
 		return application.runBootstrapCommand(args[1:], stdout, stderr)
-	case "backup", "verify":
-		return runReserved(args[0], args[1:], stdout, stderr)
+	case "backup":
+		return application.runBackupCommand(args[1:], stdout, stderr)
+	case "backup-key":
+		return application.runBackupKeyCommand(args[1:], stdout, stderr)
+	case "verify":
+		return application.runVerifyCommand(args[1:], stdout, stderr)
+	case "tailscale":
+		return application.runTailscaleCommand(args[1:], stdout, stderr)
 	case "-h", "--help":
 		writeRootUsage(stdout)
 		return exitSuccess
@@ -205,8 +228,14 @@ func (application Application) runHelp(args []string, stdout, stderr io.Writer) 
 		writeAgentUsage(stdout)
 	case "bootstrap":
 		writeBootstrapUsage(stdout)
-	case "backup", "verify":
-		writeReservedUsage(stdout, args[0])
+	case "backup":
+		writeBackupUsage(stdout)
+	case "backup-key":
+		writeBackupKeyUsage(stdout)
+	case "verify":
+		writeVerifyUsage(stdout)
+	case "tailscale":
+		writeTailscaleUsage(stdout)
 	case "version":
 		writeVersionUsage(stdout)
 	case "help":
@@ -429,6 +458,235 @@ func readEnrollmentTokenFile(path string) ([]byte, error) {
 	return value, nil
 }
 
+func (application Application) runBackupCommand(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) {
+		writeBackupUsage(stdout)
+		return exitSuccess
+	}
+	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", defaultServerConfigPath, "server YAML configuration path")
+	output := flags.String("output", "", "0600 data backup output path")
+	if err := flags.Parse(args); err != nil {
+		fmt.Fprintf(stderr, "atalaya backup: %v\n", err)
+		return exitUsage
+	}
+	if flags.NArg() != 0 || *configPath == "" || *output == "" {
+		fmt.Fprintln(stderr, "atalaya backup: --config and --output are required and positional arguments are not allowed")
+		return exitUsage
+	}
+	loaded, key, code, ok := application.loadBootstrap("backup", *configPath, stderr)
+	if !ok {
+		return code
+	}
+	defer clear(key)
+	create := application.createBackup
+	if create == nil {
+		create = backup.Create
+	}
+	_, err := create(context.Background(), backup.Options{ConfigPath: *configPath, Config: loaded, Key: key, Output: *output, Version: application.version})
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya backup: %v\n", err)
+		return exitRuntime
+	}
+	fmt.Fprintln(stdout, "backup created")
+	return exitSuccess
+}
+
+func (application Application) runBackupKeyCommand(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) {
+		writeBackupKeyUsage(stdout)
+		return exitSuccess
+	}
+	flags := flag.NewFlagSet("backup-key", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", defaultServerConfigPath, "server YAML configuration path")
+	output := flags.String("output", "", "0600 master-key export path")
+	yes := flags.Bool("yes", false, "confirm non-interactively")
+	if err := flags.Parse(args); err != nil {
+		fmt.Fprintf(stderr, "atalaya backup-key: %v\n", err)
+		return exitUsage
+	}
+	if flags.NArg() != 0 || *configPath == "" || *output == "" {
+		fmt.Fprintln(stderr, "atalaya backup-key: --config and --output are required and positional arguments are not allowed")
+		return exitUsage
+	}
+	loaded, key, code, ok := application.loadBootstrap("backup-key", *configPath, stderr)
+	if !ok {
+		return code
+	}
+	defer clear(key)
+	if !*yes {
+		if application.confirm == nil {
+			fmt.Fprintln(stderr, "atalaya backup-key: interactive confirmation is unavailable; use --yes")
+			return exitRuntime
+		}
+		confirmed, err := application.confirm(stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "atalaya backup-key: confirmation failed: %v\n", err)
+			return exitRuntime
+		}
+		if !confirmed {
+			fmt.Fprintln(stderr, "atalaya backup-key: export cancelled")
+			return exitRuntime
+		}
+	}
+	export := application.exportMasterKey
+	if export == nil {
+		export = backup.ExportKey
+	}
+	if err := export(loaded.MasterKeyPath, *output); err != nil {
+		fmt.Fprintf(stderr, "atalaya backup-key: %v\n", err)
+		return exitRuntime
+	}
+	fmt.Fprintln(stdout, "master key exported")
+	return exitSuccess
+}
+
+func (application Application) runVerifyCommand(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) {
+		writeVerifyUsage(stdout)
+		return exitSuccess
+	}
+	configPath, code, ok := parseConfigOnlyFlags("verify", args, stderr)
+	if !ok {
+		return code
+	}
+	loaded, key, code, ok := application.loadBootstrap("verify", configPath, stderr)
+	if !ok {
+		return code
+	}
+	defer clear(key)
+	verify := application.verifyDatabase
+	if verify == nil {
+		verify = database.Verify
+	}
+	result, err := verify(context.Background(), loaded.DatabasePath, key)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya verify: %v\n", err)
+		return exitRuntime
+	}
+	administrator := "absent"
+	if result.HasActiveAdministrator {
+		administrator = "present"
+	}
+	fmt.Fprintf(stdout, "verified schema=%d database_size_bytes=%d administrator=%s\n", result.SchemaVersion, result.DatabaseSizeBytes, administrator)
+	return exitSuccess
+}
+
+func (application Application) runTailscaleCommand(args []string, stdout, stderr io.Writer) int {
+	if containsHelpFlag(args) {
+		writeTailscaleUsage(stdout)
+		return exitSuccess
+	}
+	if len(args) == 0 || args[0] != "serve" {
+		fmt.Fprintln(stderr, "atalaya tailscale: expected subcommand serve")
+		return exitUsage
+	}
+	flags := flag.NewFlagSet("tailscale serve", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	role := flags.String("role", "both", "routes to configure: both, server, or agent")
+	serverConfig := flags.String("server-config", "", "server YAML configuration path")
+	agentConfig := flags.String("agent-config", "", "agent YAML configuration path")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+		if err != nil {
+			fmt.Fprintf(stderr, "atalaya tailscale serve: %v\n", err)
+		}
+		return exitUsage
+	}
+	routes, err := configuredTailscaleRoutes(*role, *serverConfig, *agentConfig)
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya tailscale serve: %v\n", err)
+		return exitUsage
+	}
+	configure := application.configureTailscale
+	if routes != nil {
+		configureRoutes := application.configureTailscaleRoutes
+		if configureRoutes == nil {
+			configureRoutes = func(ctx context.Context, desired map[int]string) (tailscale.Result, error) {
+				return tailscale.New().ConfigureRoutes(ctx, desired)
+			}
+		}
+		result, err := configureRoutes(context.Background(), routes)
+		if err != nil {
+			fmt.Fprintf(stderr, "atalaya tailscale serve: %v\n", err)
+			return exitRuntime
+		}
+		fmt.Fprintf(stdout, "tailscale Serve verified: %s (%s)\n", result.DNSName, result.Version)
+		return exitSuccess
+	}
+	if configure == nil {
+		configure = func(ctx context.Context) (tailscale.Result, error) { return tailscale.New().Configure(ctx) }
+	}
+	result, err := configure(context.Background())
+	if err != nil {
+		fmt.Fprintf(stderr, "atalaya tailscale serve: %v\n", err)
+		return exitRuntime
+	}
+	fmt.Fprintf(stdout, "tailscale Serve verified: %s (%s)\n", result.DNSName, result.Version)
+	return exitSuccess
+}
+
+func configuredTailscaleRoutes(role, serverConfigPath, agentConfigPath string) (map[int]string, error) {
+	switch role {
+	case "both":
+		if serverConfigPath == "" && agentConfigPath == "" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("role both requires no configuration paths; use --role server or --role agent")
+	case "server":
+		if serverConfigPath == "" {
+			serverConfigPath = defaultServerConfigPath
+		}
+		serverConfig, err := startupconfig.LoadServer(serverConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("load server configuration: %w", err)
+		}
+		serverTarget, err := localHTTPProxyTarget(serverConfig.Listen)
+		if err != nil {
+			return nil, fmt.Errorf("derive server Serve target: %w", err)
+		}
+		routes := map[int]string{tailscale.DashboardPort: serverTarget}
+		if agentConfigPath == "" {
+			routes[tailscale.AgentPort] = tailscale.AgentTarget
+			return routes, nil
+		}
+		agentConfig, err := startupconfig.LoadAgent(agentConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("load agent configuration: %w", err)
+		}
+		agentTarget, err := localHTTPProxyTarget(agentConfig.Listen)
+		if err != nil {
+			return nil, fmt.Errorf("derive agent Serve target: %w", err)
+		}
+		routes[tailscale.AgentPort] = agentTarget
+		return routes, nil
+	case "agent":
+		if agentConfigPath == "" {
+			return nil, fmt.Errorf("--agent-config is required for agent role")
+		}
+		agentConfig, err := startupconfig.LoadAgent(agentConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("load agent configuration: %w", err)
+		}
+		agentTarget, err := localHTTPProxyTarget(agentConfig.Listen)
+		if err != nil {
+			return nil, fmt.Errorf("derive agent Serve target: %w", err)
+		}
+		return map[int]string{tailscale.AgentPort: agentTarget}, nil
+	default:
+		return nil, fmt.Errorf("unsupported Serve role %q", role)
+	}
+}
+
+func localHTTPProxyTarget(listen string) (string, error) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil || host == "" || port == "" {
+		return "", fmt.Errorf("listen address %q is invalid", listen)
+	}
+	return "http://" + net.JoinHostPort(host, port), nil
+}
+
 func (application Application) runVersion(args []string, stdout, stderr io.Writer) int {
 	if containsHelpFlag(args) {
 		writeVersionUsage(stdout)
@@ -476,9 +734,9 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 			return exitRuntime
 		}
 		if hostRepository, available := owner.(hostquery.Repository); available {
-			handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy}, hostRepository)
+			handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy, Version: application.version}, hostRepository)
 		} else {
-			handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy})
+			handler, err = httpapi.NewAuthenticated(application.assets, service, httpapi.AuthConfig{Listen: loaded.Listen, Mode: loaded.Mode, PublicURL: loaded.PublicURL, TrustedProxy: loaded.TrustedProxy, Version: application.version})
 		}
 	}
 	if err != nil {
@@ -808,20 +1066,6 @@ func parseConfigOnlyFlags(command string, args []string, stderr io.Writer) (stri
 		return "", exitUsage, false
 	}
 	return *configPath, exitSuccess, true
-}
-
-func runReserved(command string, args []string, stdout, stderr io.Writer) int {
-	if containsHelpFlag(args) {
-		writeReservedUsage(stdout, command)
-		return exitSuccess
-	}
-	if len(args) != 0 {
-		fmt.Fprintf(stderr, "atalaya %s: unexpected arguments\n", command)
-		return exitUsage
-	}
-
-	fmt.Fprintf(stderr, "atalaya %s: command is reserved but not implemented\n", command)
-	return exitRuntime
 }
 
 func containsHelpFlag(args []string) bool {

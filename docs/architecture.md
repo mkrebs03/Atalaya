@@ -95,9 +95,10 @@ instalador verifica que la CLI instalada pueda publicar simultaneamente HTTPS 44
 falla mostrando version detectada, operacion no soportada y matriz de compatibilidad de
 la release, sin cambiar silenciosamente de puerto.
 
-El instalador configura ambas rutas cuando instala roles juntos y verifica que el
-listener local no este ocupado. La sintaxis exacta de CLI se adapta a la version de
-Tailscale detectada y se prueba antes de guardar config. Trafico HTTP sin cifrar queda
+El instalador configura ambas rutas cuando instala server (que incluye el agente local)
+y solamente 9474 para un host agent-only; el target del dashboard se deriva del listener
+loopback configurado. La sintaxis exacta de CLI se adapta a la version de Tailscale
+detectada y se prueba antes de guardar config. Trafico HTTP sin cifrar queda
 limitado a loopback; el acceso HTTPS publicado se autoriza mediante ACLs/grants de la
 tailnet.
 Instalar el rol server en Oracle instala tambien el agente local y genera directamente
@@ -165,6 +166,23 @@ scripts/                     instalacion y release
 Limites importan mas que nombres exactos. Paquetes de dominio no deben importar capa
 HTTP ni componentes Vue. Adaptadores externos implementan interfaces pequenas dentro
 del modulo que los consume.
+
+Fase 6 agrega tres piezas operativas:
+
+- internal/backup valida el estado vigente, crea el snapshot SQLite con VACUUM INTO y
+  empaqueta manifest, base y configuracion no secreta; la clave maestra se exporta por
+  separado.
+- internal/tailscale concentra la deteccion de arquitectura, version, estado conectado,
+  Self.DNSName y las dos capacidades Serve. El instalador solo invoca ese adaptador y
+  no conoce variantes de la CLI.
+- scripts/install.sh descarga y verifica el binario, instala usuario, paths y units
+  systemd, y ejecuta el flujo de upgrade con snapshot pre-migracion, rename atomico,
+  healthcheck y rollback.
+
+El binario sigue siendo unico: server y agent comparten ejecutable, pero cada unit
+recibe su YAML. El estado operativo autenticado se calcula desde SQLite sin agregar
+tablas ni una migracion nueva. La release de GitHub contiene ambos binarios Linux,
+SHA256SUMS, el instalador y las notas de la matriz Tailscale.
 
 ## 5. Flujo de enrolamiento
 

@@ -398,6 +398,15 @@ Condiciones de salida:
   compartir output con el archivo de datos.
 - Servicios no ejecutan como root y reinician tras reboot.
 
+Estado de implementacion de Fase 6: completados el CLI de backup/backup-key/verify,
+snapshot SQLite consistente con VACUUM INTO, verificacion read-only del schema vigente,
+exclusion de la clave maestra, adaptador de capacidades Tailscale Serve, instalador
+idempotente, units endurecidas, flujo de rollback, endpoint autenticado de estado,
+vista /system, workflow de GitHub Releases y documentacion operativa. La evidencia
+reproducible queda en make lint, make test, make build y make test-e2e; la prueba de
+VM Linux con Tailscale conectado sigue siendo una comprobacion de entorno de release,
+no una dependencia del runtime.
+
 ## 10. Fase 7 - Cierre v1
 
 Objetivo: validar contrato completo y preparar release estable.

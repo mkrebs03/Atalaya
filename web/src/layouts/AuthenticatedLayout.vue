@@ -83,7 +83,7 @@ async function signOut() {
     <RouterView />
     <footer class="shell-footer">
       <p>Atalaya / observabilidad privada</p>
-      <p>Fase 05 · alertas y notificaciones Discord</p>
+      <p>Fase 06 · operación, instalador y releases</p>
     </footer>
   </div>
 </template>

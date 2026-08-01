@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
@@ -74,6 +75,9 @@ func Enroll(ctx context.Context, options EnrollmentOptions) (string, error) {
 		return "", err
 	}
 	if exists {
+		if err := handoffToDirectoryOwner(options.StatePath); err != nil {
+			return "", err
+		}
 		if loaded.TokenHash != state.TokenHash || loaded.DisplayName != state.DisplayName || loaded.AgentURL != state.AgentURL || loaded.AgentVersion != state.AgentVersion || loaded.Protocol != state.Protocol {
 			return "", fmt.Errorf("enrollment state belongs to a different request")
 		}
@@ -201,8 +205,32 @@ func writeEnrollmentState(path string, state enrollmentState) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
+	if err := handoffToDirectoryOwner(temporaryPath); err != nil {
+		return err
+	}
 	if err := os.Link(temporaryPath, path); err != nil {
 		return fmt.Errorf("install enrollment state: %w", err)
+	}
+	return nil
+}
+
+// handoffToDirectoryOwner covers the documented sudo-based enrollment flow.
+// Root may create the file, but the service account that owns the state
+// directory must own the resulting credential and replay sidecar.
+func handoffToDirectoryOwner(path string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("inspect enrollment state directory: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid == 0 {
+		return nil
+	}
+	if err := os.Chown(path, int(stat.Uid), int(stat.Gid)); err != nil {
+		return fmt.Errorf("handoff enrollment file ownership: %w", err)
 	}
 	return nil
 }
@@ -215,6 +243,9 @@ func writeCredentialNoReplace(path string, credential []byte) error {
 			return fmt.Errorf("existing agent credential does not match enrollment")
 		}
 		clear(existing)
+		if err := handoffToDirectoryOwner(path); err != nil {
+			return err
+		}
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") {
 		return err
@@ -241,6 +272,9 @@ func writeCredentialNoReplace(path string, credential []byte) error {
 		return err
 	}
 	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := handoffToDirectoryOwner(temporaryPath); err != nil {
 		return err
 	}
 	if err := os.Link(temporaryPath, path); err != nil {

@@ -24,7 +24,8 @@ No se promete resistir:
 
 - Dashboard escucha HTTP solamente en loopback en todos los modos; el default es
   `127.0.0.1:8080` y Tailscale Serve publica HTTPS 443. Startup rechaza wildcard,
-  interfaces privadas y hosts externos antes de abrir el socket.
+  interfaces privadas y hosts externos antes de abrir el socket. Si `listen` usa otro
+  puerto loopback válido, Serve apunta a ese listener configurado.
 - Agente escucha en `127.0.0.1:9474` y Tailscale Serve publica ese listener por HTTPS,
   en 9474 como default fijo de v1. Nunca usa `0.0.0.0` por default. El instalador
   verifica que la CLI pueda publicar simultaneamente HTTPS 443 y 9474 y falla mostrando
@@ -45,9 +46,10 @@ Ejemplo conceptual, sujeto a CLI vigente de Tailscale:
 tailscale serve --bg http://127.0.0.1:8080
 ```
 
-Agente requiere una segunda regla Serve equivalente para su puerto HTTPS. Instalador
-detecta version de CLI y comprueba rutas efectivas; no concatena comandos suponiendo
-una sintaxis fija.
+Agente requiere una segunda regla Serve equivalente para su puerto HTTPS cuando se
+instala junto al servidor; una instalación de agente remoto configura solamente 9474.
+El instalador detecta version de CLI y comprueba rutas efectivas; no concatena comandos
+suponiendo una sintaxis fija.
 
 Cada release publica una matriz con la version estable probada y la version mas antigua
 probada. Compatibilidad se decide por las capacidades observadas para configurar 443 y
@@ -258,7 +260,7 @@ recomendadas, pero su automatizacion queda fuera de v1.
 Release incluye:
 
 - Ejecutables `linux/amd64` y `linux/arm64`.
-- Checksums SHA-256 y, cuando infraestructura lo permita, firma.
+- Checksums SHA-256 publicados y obligatorios; no se añade Sigstore en Fase 6.
 - Script de instalacion versionado.
 - Notas con migraciones y compatibilidad de agente.
 
@@ -279,6 +281,27 @@ Instalador:
   declarada por esa release.
 - No instala Tailscale silenciosamente.
 - No ejecuta migracion destructiva sin backup.
+
+La release publica la matriz efectiva usada por el adaptador: en esta fase el rango
+automatizado es Tailscale 1.52.0 a 1.99.x, con una version estable probada indicada en
+las notas de cada release. La compatibilidad se decide por la capacidad observada
+serve_https_443_9474, no por un fallback de puerto. El adaptador exige
+Self.BackendState=Running, Self.DNSName no vacio y estas rutas exactas:
+
+| HTTPS | destino local |
+| --- | --- |
+| 443 | http://127.0.0.1:8080 |
+| 9474 | http://127.0.0.1:9474 |
+
+Una ruta existente con otro destino es un conflicto y aborta antes de mutar Serve.
+No se ejecuta tailscale serve reset, funnel ni se abre un listener publico.
+Versiones fuera de la matriz fallan mostrando version detectada y capacidad ausente.
+
+El instalador usa atalaya-server.service y atalaya-agent.service. Ambas units corren
+como atalaya, declaran NoNewPrivileges, PrivateTmp, ProtectSystem=strict,
+ProtectHome, capacidades vacias, Restart=on-failure y solo /var/lib/atalaya como ruta
+de escritura. Dependen de network-online.target y tailscaled.service. La opcion
+--no-start no ejecuta migrate, start, restart ni enable --now.
 
 `atalaya verify` comprueba config, schema, acceso de lectura y descifrado de secretos.
 La restauracion es un procedimiento documentado: detener servicio, restaurar DB, clave

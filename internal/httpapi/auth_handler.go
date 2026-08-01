@@ -26,6 +26,7 @@ import (
 	"github.com/mkrebs03/atalaya/internal/metrics"
 	"github.com/mkrebs03/atalaya/internal/notifications"
 	settingsdomain "github.com/mkrebs03/atalaya/internal/settings"
+	"github.com/mkrebs03/atalaya/internal/system"
 )
 
 const sessionCookie = "atalaya_session"
@@ -39,6 +40,7 @@ type AuthConfig struct {
 	Mode         startupconfig.Mode
 	PublicURL    string
 	TrustedProxy startupconfig.TrustedProxy
+	Version      string
 	Logger       *slog.Logger
 	Clock        func() time.Time
 	Random       io.Reader
@@ -56,6 +58,7 @@ type authAPI struct {
 	settings      settingsdomain.Repository
 	alerts        alerts.Repository
 	notifications notifications.Repository
+	system        system.Provider
 }
 
 func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, hostRepositories ...hostquery.Repository) (http.Handler, error) {
@@ -108,6 +111,9 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 		if repository, ok := hostRepositories[0].(notifications.Repository); ok {
 			api.notifications = repository
 		}
+		if repository, ok := hostRepositories[0].(system.Provider); ok {
+			api.system = repository
+		}
 	}
 	mux := http.NewServeMux()
 	if api.management != nil {
@@ -124,6 +130,8 @@ func NewAuthenticated(assets fs.FS, service *auth.Service, config AuthConfig, ho
 	mux.HandleFunc("/api/v1/auth/logout", api.methodNotAllowed)
 	mux.HandleFunc("POST /api/v1/auth/change-password", api.changePassword)
 	mux.HandleFunc("/api/v1/auth/change-password", api.methodNotAllowed)
+	mux.HandleFunc("GET /api/v1/system/status", api.systemStatus)
+	mux.HandleFunc("/api/v1/system/status", api.methodNotAllowed)
 	if api.hosts != nil {
 		mux.HandleFunc("GET /api/v1/hosts", api.listHosts)
 		mux.HandleFunc("HEAD /api/v1/hosts", api.hostsMethodNotAllowed)

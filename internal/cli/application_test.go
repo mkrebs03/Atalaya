@@ -15,11 +15,13 @@ import (
 	"time"
 
 	"github.com/mkrebs03/atalaya/internal/auth"
+	"github.com/mkrebs03/atalaya/internal/backup"
 	startupconfig "github.com/mkrebs03/atalaya/internal/config"
 	atalayacrypto "github.com/mkrebs03/atalaya/internal/crypto"
 	"github.com/mkrebs03/atalaya/internal/database"
 	"github.com/mkrebs03/atalaya/internal/hosts"
 	"github.com/mkrebs03/atalaya/internal/server"
+	"github.com/mkrebs03/atalaya/internal/tailscale"
 )
 
 const cliTestPasswordPHC = "$argon2id$v=19$m=65536,t=3,p=4$AAECAwQFBgcICQoLDA0ODw$hTsnKkTbFCHAKWJmmlXrCZTzyrOF7RxMeSU+7hm6tJ4"
@@ -55,13 +57,13 @@ func TestStableCommandExitCodes(t *testing.T) {
 		{name: "admin create help", args: []string{"admin", "create", "--help"}, wantCode: exitSuccess, wantOutput: "--username"},
 		{name: "admin create", args: []string{"admin", "create"}, wantCode: exitSuccess, wantOutput: "administrator \"admin\" created"},
 		{name: "agent requires config", args: []string{"agent"}, wantCode: exitUsage, wantError: "--config is required"},
-		{name: "backup reserved", args: []string{"backup"}, wantCode: exitRuntime, wantError: "not implemented"},
-		{name: "verify reserved", args: []string{"verify"}, wantCode: exitRuntime, wantError: "not implemented"},
+		{name: "backup requires output", args: []string{"backup"}, wantCode: exitUsage, wantError: "--config and --output are required"},
+		{name: "verify missing database", args: []string{"verify"}, wantCode: exitRuntime, wantError: "schema is not current"},
 		{name: "agent help", args: []string{"agent", "--help"}, wantCode: exitSuccess, wantOutput: "--config"},
 		{name: "bootstrap help", args: []string{"bootstrap", "--help"}, wantCode: exitSuccess, wantOutput: "local-agent"},
 		{name: "bootstrap local help", args: []string{"bootstrap", "local-agent", "--help"}, wantCode: exitSuccess, wantOutput: "--agent-url"},
 		{name: "bootstrap required", args: []string{"bootstrap", "local-agent"}, wantCode: exitUsage, wantError: "are required"},
-		{name: "reserved invalid argument", args: []string{"backup", "--output", "file"}, wantCode: exitUsage, wantError: "unexpected arguments"},
+		{name: "backup positional argument", args: []string{"backup", "extra"}, wantCode: exitUsage, wantError: "required and positional"},
 	}
 
 	for _, test := range tests {
@@ -402,6 +404,85 @@ func TestDefaultConfigPathIsSharedByPhase1ACommands(t *testing.T) {
 	}
 }
 
+func TestPhase6OperationalCommandsUseStableExitCodesAndDoNotPrintSecrets(t *testing.T) {
+	t.Parallel()
+
+	application := testApplication()
+	key := bytes.Repeat([]byte{0x7a}, 32)
+	application.loadMasterKey = func(string) ([]byte, error) {
+		return append([]byte(nil), key...), nil
+	}
+	application.createBackup = func(_ context.Context, options backup.Options) (backup.Manifest, error) {
+		if options.Output != "/tmp/backup.tar.gz" || !bytes.Equal(options.Key, key) {
+			t.Fatalf("backup options = %+v", options)
+		}
+		return backup.Manifest{SchemaVersion: 8}, nil
+	}
+	application.exportMasterKey = func(keyPath, output string) error {
+		if keyPath != "/tmp/master.key" || output != "/tmp/exported.key" {
+			t.Fatalf("export paths = %q %q", keyPath, output)
+		}
+		return nil
+	}
+	application.verifyDatabase = func(_ context.Context, path string, received []byte) (database.Verification, error) {
+		if path != "/tmp/atalaya.db" || !bytes.Equal(received, key) {
+			t.Fatalf("verify inputs = %q %x", path, received)
+		}
+		return database.Verification{SchemaVersion: 8, DatabaseSizeBytes: 12, HasActiveAdministrator: true}, nil
+	}
+	application.configureTailscale = func(context.Context) (tailscale.Result, error) {
+		return tailscale.Result{Version: "1.86.2", DNSName: "oracle.example.ts.net"}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := application.Run([]string{"backup", "--config", "/tmp/server.yaml", "--output", "/tmp/backup.tar.gz"}, &stdout, &stderr); code != exitSuccess {
+		t.Fatalf("backup code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "backup created") {
+		t.Fatalf("backup stdout=%q", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := application.Run([]string{"backup-key", "--output", "/tmp/exported.key", "--yes"}, &stdout, &stderr); code != exitSuccess {
+		t.Fatalf("backup-key code=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := application.Run([]string{"verify"}, &stdout, &stderr); code != exitSuccess {
+		t.Fatalf("verify code=%d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "schema=8") || strings.Contains(got, string(key)) {
+		t.Fatalf("verify stdout=%q", got)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := application.Run([]string{"tailscale", "serve"}, &stdout, &stderr); code != exitSuccess {
+		t.Fatalf("tailscale code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "oracle.example.ts.net") {
+		t.Fatalf("tailscale stdout=%q", stdout.String())
+	}
+}
+
+func TestBackupKeyConfirmationCanCancelWithoutExport(t *testing.T) {
+	t.Parallel()
+
+	application := testApplication()
+	exported := false
+	application.confirm = func(io.Writer) (bool, error) { return false, nil }
+	application.exportMasterKey = func(string, string) error {
+		exported = true
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := application.Run([]string{"backup-key", "--output", "/tmp/exported.key"}, &stdout, &stderr); code != exitRuntime {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if exported || !strings.Contains(stderr.String(), "cancelled") {
+		t.Fatalf("exported=%v stderr=%q", exported, stderr.String())
+	}
+}
+
 type fakeDatabase struct {
 	events        *[]string
 	administrator auth.Administrator
@@ -538,5 +619,33 @@ func testServerConfig() startupconfig.ServerConfig {
 		PublicURL:     "http://127.0.0.1:8080",
 		DatabasePath:  "/tmp/atalaya.db",
 		MasterKeyPath: "/tmp/master.key",
+	}
+}
+
+func TestConfiguredTailscaleRoutesUseRoleAndListenerFromConfig(t *testing.T) {
+	directory := t.TempDir()
+	serverPath := filepath.Join(directory, "server.yaml")
+	agentPath := filepath.Join(directory, "agent.yaml")
+	if err := os.WriteFile(serverPath, []byte("listen: 127.0.0.1:18080\nmode: development\npublic_url: http://127.0.0.1:18080\ndatabase_path: database.db\nmaster_key_path: master.key\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentPath, []byte("listen: 127.0.0.1:19474\nserver_url: http://127.0.0.1:18080\nadvertised_url: https://agent.example.ts.net:9474\ncredential_path: credential\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	routes, err := configuredTailscaleRoutes("server", serverPath, agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routes[tailscale.DashboardPort] != "http://127.0.0.1:18080" || routes[tailscale.AgentPort] != "http://127.0.0.1:19474" {
+		t.Fatalf("server routes = %+v", routes)
+	}
+
+	routes, err = configuredTailscaleRoutes("agent", "", agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[tailscale.AgentPort] != "http://127.0.0.1:19474" {
+		t.Fatalf("agent routes = %+v", routes)
 	}
 }
