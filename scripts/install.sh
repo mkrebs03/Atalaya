@@ -482,23 +482,43 @@ configure_serve() {
   esac
 }
 healthcheck() {
+  healthcheck_attempts=30
+  healthcheck_interval=1
   check_url() {
     path=$1
+    error_file="$TMP_DIR/healthcheck-error"
     if command -v curl >/dev/null 2>&1; then
-      curl --fail --silent --show-error --max-time 10 "http://$path" >/dev/null
+      curl --fail --silent --show-error --max-time 10 "http://$path" >/dev/null 2>"$error_file"
     elif command -v wget >/dev/null 2>&1; then
-      wget --quiet --timeout=10 --output-document=- "http://$path" >/dev/null
+      wget --quiet --timeout=10 --output-document=- "http://$path" >/dev/null 2>"$error_file"
     else
       die "curl or wget is required for health checks"
     fi
   }
+  wait_for_url() {
+    path=$1
+    attempt=1
+    while [ "$attempt" -le "$healthcheck_attempts" ]; do
+      if check_url "$path"; then
+        return 0
+      fi
+      if [ "$attempt" -lt "$healthcheck_attempts" ]; then
+        sleep "$healthcheck_interval"
+      fi
+      attempt=$((attempt + 1))
+    done
+    if [ -s "$TMP_DIR/healthcheck-error" ]; then
+      cat "$TMP_DIR/healthcheck-error" >&2
+    fi
+    return 1
+  }
   case "$ROLE" in
     server|upgrade)
-      check_url "$SERVER_LISTEN/healthz"
-      check_url "$AGENT_LISTEN/agent/v1/healthz"
+      wait_for_url "$SERVER_LISTEN/healthz"
+      wait_for_url "$AGENT_LISTEN/agent/v1/healthz"
       ;;
     agent)
-      check_url "$AGENT_LISTEN/agent/v1/healthz"
+      wait_for_url "$AGENT_LISTEN/agent/v1/healthz"
       ;;
   esac
 }
