@@ -25,7 +25,7 @@ make test-e2e
 
 Las pull requests ejecutan la validación completa (`lint`, tests, E2E y builds). Tras
 un merge, `main` ejecuta una verificación de build más breve, CodeQL vuelve a analizar
-la rama principal y el CI exitoso permite actualizar el canal `dev`.
+la rama principal y el CI exitoso permite publicar un nuevo build del canal `dev`.
 
 Los cambios de UI deben incluir pruebas relevantes y, cuando corresponda, actualizar
 los snapshots visuales. Los cambios de seguridad deben cubrir sesiones, CSRF,
@@ -51,8 +51,9 @@ Atalaya usa dos canales:
 
 - `stable`: una Release PR aprobada calcula la siguiente versión SemVer, actualiza
   `CHANGELOG.md` y publica una release inmutable para usuarios finales.
-- `dev`: CI actualiza la release rolling `dev` después de cada push exitoso a `main`.
-  Sirve para probar el último estado integrado y no debe usarse en producción.
+- `dev`: cada CI exitoso sobre `main` publica una pre-release inmutable con un tag
+  histórico `dev-<run>-<short-sha>`. El instalador resuelve el tag más reciente para
+  probar el último estado integrado; este canal no debe usarse en producción.
 
 Los mensajes Conventional Commits determinan el siguiente incremento: `fix` aumenta
 patch, `feat` aumenta minor y un cambio incompatible llega a `1.0.0`. Una excepción
@@ -72,16 +73,17 @@ aprobarla y fusionarla se generarán el tag `v0.0.1` y sus artefactos estables.
 Para instalar el estado dev más reciente:
 
 ```bash
-curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+curl -fsSL https://raw.githubusercontent.com/mkrebs03/Atalaya/main/scripts/install.sh \
   | sudo sh -s -- server --channel dev
 ```
 
 Para actualizar una instalación existente al estado dev más reciente:
 
 ```bash
-curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+curl -fsSL https://raw.githubusercontent.com/mkrebs03/Atalaya/main/scripts/install.sh \
   | sudo sh -s -- upgrade --channel dev
 ```
 
-No reutilices tags `vX.Y.Z` ni edites manualmente una release estable; el único
-puntero mutable es `dev`.
+`--channel dev` consulta las releases públicas, selecciona el `dev-*` más reciente y
+verifica sus checksums. No reutilices tags `vX.Y.Z` ni edites manualmente una release
+estable; los tags `dev-*` también son históricos e inmutables.
