@@ -208,33 +208,38 @@ jobs:
           - SHA-256 checksums: included in SHA256SUMS.
           - This channel is unstable and must not be used for production data.
           EOF
-      - name: Move dev tag and publish rolling assets
+      - name: Recreate immutable dev release
         if: steps.freshness.outputs.publish == 'true'
         run: |
           tag_ref="repos/${GITHUB_REPOSITORY}/git/refs/tags/dev"
-          if git show-ref --verify --quiet refs/tags/dev; then
-            gh api --method PATCH "$tag_ref" -f sha="$CI_SHA" -F force=true
-          fi
           if gh release view dev >/dev/null 2>&1; then
-            gh release upload dev \
-              build/dev/atalaya-linux-amd64 \
-              build/dev/atalaya-linux-arm64 \
-              build/dev/install.sh \
-              build/dev/SHA256SUMS \
-              --clobber
-            gh release edit dev \
-              --target "$CI_SHA" \
-              --title "Atalaya dev" \
-              --notes-file build/dev/RELEASE-NOTES.md \
-              --prerelease
-          else
-            gh release create dev \
-              build/dev/atalaya-linux-amd64 \
-              build/dev/atalaya-linux-arm64 \
-              build/dev/install.sh \
-              build/dev/SHA256SUMS \
-              --target "$CI_SHA" \
-              --title "Atalaya dev" \
-              --notes-file build/dev/RELEASE-NOTES.md \
-              --prerelease
+            # Published releases are immutable. Delete the old release before
+            # moving its rolling tag; stable releases remain historical.
+            gh release delete dev --yes
           fi
+          if git show-ref --verify --quiet refs/tags/dev; then
+            updated=false
+            for attempt in 1 2 3 4 5; do
+              if gh api --method PATCH "$tag_ref" -f sha="$CI_SHA" -F force=true >/dev/null; then
+                updated=true
+                break
+              fi
+              if [ "$attempt" -lt 5 ]; then
+                sleep 2
+              fi
+            done
+            [ "$updated" = true ]
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref=refs/tags/dev \
+              -f sha="$CI_SHA" >/dev/null
+          fi
+          gh release create dev \
+            build/dev/atalaya-linux-amd64 \
+            build/dev/atalaya-linux-arm64 \
+            build/dev/install.sh \
+            build/dev/SHA256SUMS \
+            --target "$CI_SHA" \
+            --title "Atalaya dev" \
+            --notes-file build/dev/RELEASE-NOTES.md \
+            --prerelease

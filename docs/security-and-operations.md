@@ -417,10 +417,12 @@ Una release `stable` incluye:
 - Notas con migraciones y compatibilidad de agente.
 
 El canal `dev` publica los mismos artefactos en una GitHub Release rolling marcada como
-pre-release. Su tag `dev` y sus assets se reemplazan despues de cada CI exitoso sobre
-`main`; el binario conserva una version `0.0.0-dev.<run>.<short-sha>` para identificar
-el commit probado. `dev` es publico para facilitar pruebas, no tiene garantia de
-compatibilidad hacia adelante y no debe usarse con la base de datos de produccion.
+pre-release. Como los releases publicados de GitHub son inmutables, el workflow elimina
+el release `dev` anterior, mueve el tag `dev` y crea un release nuevo despues de cada CI
+exitoso sobre `main`. Puede existir una ventana breve sin assets durante ese reemplazo;
+`dev` es publico para facilitar pruebas, no tiene garantia de compatibilidad hacia
+adelante y no debe usarse con la base de datos de produccion. El binario conserva una
+version `0.0.0-dev.<run>.<short-sha>` para identificar el commit probado.
 
 Los tags `stable` son inmutables. El instalador usa `latest` o un tag estable para
 produccion y requiere `--channel dev` para seleccionar el canal rolling; no existe un
