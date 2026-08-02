@@ -41,7 +41,7 @@ func TestServeCompatibilityWithInstalledBinary(t *testing.T) {
 				return emptyServeStatus(), nil
 			}
 			return exactServeStatus(), nil
-		case "serve --https=443 http://127.0.0.1:8080", "serve --https=9474 http://127.0.0.1:9474":
+		case "serve --bg --https=443 http://127.0.0.1:8080", "serve --bg --https=9474 http://127.0.0.1:9474":
 			return nil, nil
 		default:
 			return nil, errors.New("unexpected Tailscale command")

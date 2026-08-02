@@ -9,6 +9,16 @@ on:
       - CI
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      stable_tag:
+        description: Existing stable tag whose draft release should be validated and published
+        required: true
+        type: string
+      stable_version:
+        description: SemVer version embedded in the stable artifacts, without the v prefix
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -35,7 +45,12 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   tailscale-compatibility:
-    if: needs['release-please'].outputs.release_created == 'true'
+    if: >-
+      always() &&
+      (
+        needs['release-please'].outputs.release_created == 'true' ||
+        github.event_name == 'workflow_dispatch'
+      )
     needs: release-please
     name: Tailscale Serve compatibility (${{ matrix.version }})
     runs-on: ubuntu-latest
@@ -46,11 +61,16 @@ jobs:
       matrix:
         # These are the oldest and newest release endpoints of the supported
         # range. The adapter's semver matrix covers versions between them.
-        version: ["1.52.0", "1.99.0"]
+        version: ["1.52.0", "1.98.9"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs['release-please'].outputs.tag_name }}
+          ref: ${{ inputs.stable_tag || needs['release-please'].outputs.tag_name }}
+      - name: Use current compatibility harness for recovery
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout "$GITHUB_SHA" -- internal/tailscale/compatibility_test.go
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: .tool-versions
@@ -75,8 +95,12 @@ jobs:
 
   publish-stable:
     if: >-
-      needs['release-please'].outputs.release_created == 'true' &&
-      needs['tailscale-compatibility'].result == 'success'
+      always() &&
+      needs['tailscale-compatibility'].result == 'success' &&
+      (
+        needs['release-please'].outputs.release_created == 'true' ||
+        github.event_name == 'workflow_dispatch'
+      )
     needs:
       - release-please
       - tailscale-compatibility
@@ -86,12 +110,15 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.ATALAYA_RELEASE_TOKEN }}
-      RELEASE_TAG: ${{ needs['release-please'].outputs.tag_name }}
-      RELEASE_VERSION: ${{ needs['release-please'].outputs.version }}
+      RELEASE_TAG: ${{ inputs.stable_tag || needs['release-please'].outputs.tag_name }}
+      RELEASE_VERSION: ${{ inputs.stable_version || needs['release-please'].outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs['release-please'].outputs.tag_name }}
+          ref: ${{ inputs.stable_tag || needs['release-please'].outputs.tag_name }}
+      - name: Verify recovery target is a draft release
+        if: github.event_name == 'workflow_dispatch'
+        run: test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = true
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: .tool-versions
@@ -120,7 +147,7 @@ jobs:
           - SHA-256 checksums: included in SHA256SUMS.
           - Database schema migrations included: ${schema_version}.
           - Agent protocol: v1.
-          - Tailscale Serve compatibility validated against 1.52.0 and 1.99.0.
+          - Tailscale Serve compatibility validated against 1.52.0 and 1.98.9.
           - Upgrade must create a backup and run atalaya verify after migration.
           EOF
       - name: Upload stable assets

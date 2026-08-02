@@ -70,6 +70,12 @@ Para inicializar la primera release, agrega una sola vez el footer `Release-As: 
 en un commit de `main`. Release Please abrirá la Release PR correspondiente; al
 aprobarla y fusionarla se generarán el tag `v0.0.1` y sus artefactos estables.
 
+Si una Release PR ya fue fusionada pero una validación deja la release como draft, no
+borres ni muevas el tag estable. Corrige la validación y ejecuta manualmente el
+workflow **Release** desde **Actions → Run workflow**, introduciendo el tag existente
+en `stable_tag` y su versión sin `v` en `stable_version`. La recuperación solo acepta
+un release draft existente, vuelve a validar la matriz Tailscale y publica sus assets.
+
 Para instalar el estado dev más reciente:
 
 ```bash
