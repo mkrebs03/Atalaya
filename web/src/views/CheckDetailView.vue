@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageIntro from '@/components/ui/PageIntro.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import HistoricalChart from '@/components/hosts/HistoricalChart.vue'
 import { useAuth } from '@/auth/useAuth'
 import { useHostPolling } from '@/composables/useHostPolling'
@@ -16,6 +17,13 @@ import {
   type CheckInput,
   type CheckMetrics,
 } from '@/checks/api'
+import {
+  checkStateLabel,
+  checkStateTone,
+  errorCodeLabel,
+  formatDateTime,
+  resolutionLabel,
+} from '@/ui/labels'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,12 +34,13 @@ const error = ref('')
 const success = ref('')
 const rangeHours = ref(24)
 const editOpen = ref(false)
+const archiveOpen = ref(false)
 const requestId = ref('')
 const draft = reactive<CheckInput>({ name: '', type: 'http' })
 
 const detail = useHostPolling(async (signal) => {
   const result = await getCheck(id, signal)
-  if (!result.data) throw new Error('check missing')
+  if (!result.data) throw new Error('service missing')
   return result.data
 })
 
@@ -90,7 +99,8 @@ async function save() {
   try {
     await patchCheck(auth.mutate, check.value, { ...draft })
     editOpen.value = false
-    success.value = 'Configuración guardada. El siguiente slot usará la nueva cadencia.'
+    success.value =
+      'Configuración guardada. El nuevo intervalo se aplicará en la próxima comprobación.'
     detail.restart()
     metrics.restart()
   } catch {
@@ -112,10 +122,32 @@ async function action(kind: 'enable' | 'disable' | 'archive' | 'restore') {
     }
     detail.restart()
   } catch {
-    error.value = 'No se pudo cambiar el estado administrativo del check.'
+    error.value = 'No se pudo cambiar el estado administrativo del servicio.'
   } finally {
     busy.value = ''
   }
+}
+
+function requestAction(kind: 'enable' | 'disable' | 'archive' | 'restore') {
+  if (kind === 'archive') {
+    archiveOpen.value = true
+    return
+  }
+  void action(kind)
+}
+
+function confirmArchive() {
+  archiveOpen.value = false
+  void action('archive')
+}
+
+function runStateLabel(state: 'queued' | 'running' | 'completed' | 'failed') {
+  return {
+    queued: 'En cola',
+    running: 'En ejecución',
+    completed: 'Completada',
+    failed: 'Fallida',
+  }[state]
 }
 
 function newRequestId() {
@@ -129,8 +161,8 @@ async function manualRun() {
   error.value = ''
   success.value = ''
   try {
-    const result = await runCheck(auth.mutate, id, requestId.value)
-    success.value = `Ejecución ${result.status}. Puedes seguirla en el historial manual.`
+    await runCheck(auth.mutate, id, requestId.value)
+    success.value = 'Ejecución encolada. Puedes seguirla en el historial manual.'
     runs.restart()
     newRequestId()
   } catch {
@@ -163,22 +195,26 @@ onMounted(() => {
       Consultando señal…
     </p>
     <p v-else-if="detail.error.value && !check" class="check-detail__loading" role="alert">
-      No pudimos cargar este check.
+      No pudimos cargar este servicio.
     </p>
     <template v-else-if="check">
       <section class="check-detail__hero">
         <PageIntro
-          index="04 / 01"
-          :eyebrow="`${check.type.toUpperCase()} / ${check.observed_state}`"
+          :eyebrow="
+            check.type === 'http'
+              ? 'HTTP · ' + (check.archived ? 'Archivado' : 'Servicio')
+              : 'TCP · ' + (check.archived ? 'Archivado' : 'Servicio')
+          "
           :title="check.name"
-          :copy="check.url || `${check.host}:${check.port}`"
+          :copy="check.url || (check.host ? check.host + ':' + check.port : '')"
           compact
         />
         <aside class="check-detail__hero-actions">
-          <span class="check-state" :class="`check-state--${check.observed_state}`"
-            ><i aria-hidden="true"></i>{{ check.observed_state }}</span
+          <span class="check-state" :data-tone="checkStateTone(check.observed_state, check.stale)"
+            ><i aria-hidden="true"></i
+            >{{ checkStateLabel(check.observed_state, check.stale) }}</span
           >
-          <span>{{ check.stale ? 'Señal stale' : 'Señal fresca' }}</span>
+          <span>{{ check.stale ? 'Datos desactualizados' : 'Última comprobación válida' }}</span>
           <button v-if="check.enabled" type="button" :disabled="!!busy" @click="action('disable')">
             Desactivar
           </button>
@@ -193,11 +229,21 @@ onMounted(() => {
           <button v-if="check.archived" type="button" :disabled="!!busy" @click="action('restore')">
             Restaurar
           </button>
-          <button v-else type="button" :disabled="!!busy" @click="action('archive')">
+          <button v-else type="button" :disabled="!!busy" @click="requestAction('archive')">
             Archivar
           </button>
         </aside>
       </section>
+
+      <ConfirmDialog
+        :open="archiveOpen"
+        title="¿Archivar este servicio?"
+        copy="Dejará de aparecer entre los servicios activos, pero podrás restaurarlo después."
+        confirm-label="Archivar servicio"
+        danger
+        @confirm="confirmArchive"
+        @cancel="archiveOpen = false"
+      />
 
       <p v-if="error" class="check-detail__message check-detail__message--error" role="alert">
         {{ error }}
@@ -209,8 +255,8 @@ onMounted(() => {
       <section class="check-detail__workspace">
         <div class="check-detail__topline">
           <div>
-            <p class="check-detail__eyebrow">01 / Estado derivado</p>
-            <h2>La última pregunta</h2>
+            <p class="check-detail__eyebrow">Estado actual</p>
+            <h2>La última comprobación.</h2>
           </div>
           <button type="button" @click="toggleEdit">
             {{ editOpen ? 'Cerrar edición' : 'Editar configuración' }}
@@ -220,19 +266,13 @@ onMounted(() => {
           <div>
             <dt>Último intento</dt>
             <dd>
-              {{
-                check.last_attempt_at
-                  ? new Date(check.last_attempt_at).toLocaleString('es-CL')
-                  : '—'
-              }}
+              {{ check.last_attempt_at ? formatDateTime(check.last_attempt_at) : 'Sin datos' }}
             </dd>
           </div>
           <div>
             <dt>Último resultado</dt>
             <dd>
-              {{
-                check.last_result_at ? new Date(check.last_result_at).toLocaleString('es-CL') : '—'
-              }}
+              {{ formatDateTime(check.last_result_at) }}
             </dd>
           </div>
           <div>
@@ -241,7 +281,7 @@ onMounted(() => {
           </div>
           <div>
             <dt>Error</dt>
-            <dd>{{ check.last_error_code || 'ninguno' }}</dd>
+            <dd>{{ errorCodeLabel(check.last_error_code) }}</dd>
           </div>
           <div>
             <dt>Status HTTP</dt>
@@ -256,7 +296,7 @@ onMounted(() => {
         <form v-if="editOpen" class="check-detail__edit" @submit.prevent="save">
           <label>Nombre<input v-model.trim="draft.name" maxlength="128" required /></label>
           <label
-            >Intervalo (s)<input
+            >Intervalo entre comprobaciones (segundos)<input
               v-model.number="draft.interval_seconds"
               type="number"
               min="15"
@@ -264,7 +304,7 @@ onMounted(() => {
               required
           /></label>
           <label
-            >Timeout (s)<input
+            >Tiempo de espera (segundos)<input
               v-model.number="draft.timeout_seconds"
               type="number"
               min="1"
@@ -280,7 +320,7 @@ onMounted(() => {
           /></label>
           <template v-if="draft.type === 'http'">
             <label
-              >Status mínimo<input
+              >Código HTTP mínimo<input
                 v-model.number="draft.expected_status_min"
                 type="number"
                 min="100"
@@ -288,7 +328,7 @@ onMounted(() => {
                 required
             /></label>
             <label
-              >Status máximo<input
+              >Código HTTP máximo<input
                 v-model.number="draft.expected_status_max"
                 type="number"
                 min="100"
@@ -296,7 +336,8 @@ onMounted(() => {
                 required
             /></label>
             <label class="check-detail__edit-check"
-              ><input v-model="draft.follow_redirects" type="checkbox" /> Seguir redirects</label
+              ><input v-model="draft.follow_redirects" type="checkbox" /> Seguir
+              redirecciones</label
             >
             <label
               >Máximo redirects<input
@@ -315,8 +356,8 @@ onMounted(() => {
         <section class="check-detail__history" aria-labelledby="history-title">
           <header class="check-detail__section-heading">
             <div>
-              <p class="check-detail__eyebrow">02 / Histórico scheduled</p>
-              <h2 id="history-title">La señal en el tiempo</h2>
+              <p class="check-detail__eyebrow">Histórico</p>
+              <h2 id="history-title">La señal en el tiempo.</h2>
             </div>
             <label
               >Rango<select v-model.number="rangeHours" @change="refreshMetrics">
@@ -326,6 +367,9 @@ onMounted(() => {
               </select></label
             >
           </header>
+          <p v-if="metrics.data.value" class="check-detail__hint">
+            {{ resolutionLabel(metrics.data.value.resolution) }} para este rango.
+          </p>
           <p v-if="metrics.error.value" class="check-detail__hint" role="alert">
             No hay histórico disponible para este rango.
           </p>
@@ -348,8 +392,8 @@ onMounted(() => {
         <section class="check-detail__runs" aria-labelledby="runs-title">
           <header class="check-detail__section-heading">
             <div>
-              <p class="check-detail__eyebrow">03 / Diagnóstico</p>
-              <h2 id="runs-title">Ejecuciones manuales</h2>
+              <p class="check-detail__eyebrow">Comprobaciones puntuales</p>
+              <h2 id="runs-title">Ejecuciones manuales.</h2>
             </div>
             <button
               class="primary-button"
@@ -361,8 +405,8 @@ onMounted(() => {
             </button>
           </header>
           <p class="check-detail__hint">
-            Las ejecuciones manuales no cambian el estado derivado ni alimentan las series
-            programadas.
+            Una ejecución manual comprueba el servicio ahora sin modificar su configuración ni el
+            histórico automático.
           </p>
           <p v-if="runs.error.value" class="check-detail__hint" role="alert">
             No pudimos consultar las ejecuciones.
@@ -373,14 +417,14 @@ onMounted(() => {
           <ul v-else class="run-list">
             <li v-for="run in runs.data.value" :key="run.run_id">
               <div>
-                <strong>{{ run.state }}</strong
-                ><span>{{ new Date(run.requested_at).toLocaleString('es-CL') }}</span>
+                <strong>{{ runStateLabel(run.state) }}</strong
+                ><span>{{ formatDateTime(run.requested_at) }}</span>
               </div>
               <div>
                 <span v-if="run.result"
-                  >{{ run.result.status }} ·
+                  >{{ checkStateLabel(run.result.status) }} ·
                   {{ run.result.latency_ms === null ? '—' : `${run.result.latency_ms} ms` }}</span
-                ><span v-else>{{ run.failure_code || 'En espera' }}</span>
+                ><span v-else>{{ errorCodeLabel(run.failure_code) }}</span>
               </div>
             </li>
           </ul>
@@ -435,11 +479,14 @@ onMounted(() => {
   border-radius: 50%;
   background: var(--ink-muted);
 }
-.check-state--up i {
+.check-state[data-tone='success'] i {
   background: var(--signal);
 }
-.check-state--down i {
+.check-state[data-tone='danger'] i {
   background: var(--accent-text);
+}
+.check-state[data-tone='warning'] i {
+  background: #8a5a00;
 }
 .check-detail__message {
   margin: 1rem var(--page-gutter) 0;
@@ -453,7 +500,7 @@ onMounted(() => {
   color: var(--signal);
 }
 .check-detail__workspace {
-  padding: clamp(2rem, 6vw, 5rem) var(--page-gutter) clamp(4rem, 9vw, 8rem);
+  padding: clamp(2rem, 6vw, 5rem) var(--page-gutter) clamp(3rem, 7vw, 6rem);
 }
 .check-detail__topline,
 .check-detail__section-heading {

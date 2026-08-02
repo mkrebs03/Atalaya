@@ -29,17 +29,16 @@ async function submit(currentPassword: string, newPassword: string) {
   <main id="main-content" class="account route-view" tabindex="-1">
     <section class="account__intro">
       <PageIntro
-        index="02"
-        eyebrow="Identidad local"
+        eyebrow="Cuenta"
         :title="auth.administrator.value?.username ?? ''"
-        copy="Una sola cuenta administra esta instancia. Sus credenciales permanecen dentro de Atalaya y no dependen de la identidad Tailscale."
+        copy="Esta instalación tiene una única cuenta de administrador. Sus credenciales permanecen dentro de Atalaya y no dependen de la identidad de Tailscale."
         compact
       />
     </section>
 
     <section class="account__workspace" aria-labelledby="password-title">
       <aside class="account__identity">
-        <div class="account__identity-topline"><span>01</span><span>Administrador</span></div>
+        <div class="account__identity-topline"><span>Cuenta</span><span>Administrador</span></div>
         <div class="account__identity-body">
           <p class="account__status"><span aria-hidden="true"></span>Sesión activa</p>
           <h2 class="account__identity-name">{{ auth.administrator.value?.username }}</h2>
@@ -47,12 +46,12 @@ async function submit(currentPassword: string, newPassword: string) {
             Cambiar la contraseña revoca las demás sesiones y mantiene esta conexión activa.
           </p>
         </div>
-        <p class="account__identity-tag">LOCAL / SINGLE ADMIN</p>
+        <p class="account__identity-tag">Cuenta de administrador</p>
       </aside>
 
       <div class="account__form-panel">
         <div class="account__form-heading">
-          <p>02 / Credencial</p>
+          <p>Seguridad de la cuenta</p>
           <h2 id="password-title">Cambiar contraseña</h2>
           <p>Usa al menos 12 caracteres. El cambio cerrará las demás sesiones.</p>
         </div>

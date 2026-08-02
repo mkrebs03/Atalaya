@@ -10,6 +10,11 @@ async function login(page: import('@playwright/test').Page) {
   await expect(page).toHaveURL('/')
 }
 
+async function openAdministration(page: import('@playwright/test').Page, item: string) {
+  await page.getByRole('button', { name: /Administración/ }).click()
+  await page.getByRole('link', { name: item, exact: true }).click()
+}
+
 async function captureViews(
   page: import('@playwright/test').Page,
   viewport: { width: number; height: number },
@@ -34,7 +39,7 @@ async function captureViews(
     maskColor: '#ece9df',
   })
 
-  await page.getByRole('link', { name: 'Cuenta' }).click()
+  await openAdministration(page, 'Cuenta')
   await expect(page).toHaveScreenshot(`account-${suffix}.png`, { fullPage: true })
 }
 

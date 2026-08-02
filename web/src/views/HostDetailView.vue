@@ -14,9 +14,9 @@ import {
   type HostDetail,
   type MetricSeries,
 } from '@/hosts/api'
-import { formatDate } from '@/hosts/format'
 import { authKey } from '@/auth/useAuth'
 import { selectFilesystem } from '@/hosts/management'
+import { formatDateTime, hostStateLabel, resolutionLabel } from '@/ui/labels'
 
 interface DetailState {
   host: HostDetail
@@ -64,6 +64,9 @@ const history = useHostPolling(async (signal) => {
 })
 
 const historySeries = computed(() => history.data.value?.series ?? [])
+const hasHistoryPoints = computed(() =>
+  historySeries.value.some((series) => series.points.length > 0),
+)
 const historyGapThreshold = computed(() => {
   const interval = polling.data.value?.host.interval_seconds ?? 60
   return interval * 2 + 10
@@ -124,17 +127,17 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
         <RouterLink class="host-detail__back" :to="{ name: 'home' }"
           >← Volver al resumen</RouterLink
         >
-        <p class="host-detail__eyebrow">Host / estado actual</p>
+        <p class="host-detail__eyebrow">Host · estado actual</p>
         <h1>{{ polling.data.value.host.display_name }}</h1>
         <div class="host-detail__state">
-          <strong>{{ polling.data.value.host.observed_state }}</strong>
-          <span v-if="polling.data.value.host.stale">Señal vencida</span>
-          <span v-if="polling.data.value.host.observed_state === 'unreachable'"
-            >Agente sin alcance</span
-          >
+          <strong>{{
+            hostStateLabel(polling.data.value.host.observed_state, polling.data.value.host.stale)
+          }}</strong>
           <span class="host-detail__received"
-            >Última recepción ·
-            {{ formatDate(polling.data.value.host.last_success_received_at) }}</span
+            >Última actualización ·
+            {{
+              formatDateTime(polling.data.value.host.last_success_received_at, 'Sin datos todavía')
+            }}</span
           >
         </div>
         <ul
@@ -153,8 +156,8 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
       <section class="host-history" aria-labelledby="history-title">
         <header class="host-history__header">
           <div>
-            <p>Lectura histórica</p>
-            <h2 id="history-title">La señal a través del tiempo.</h2>
+            <p>Histórico</p>
+            <h2 id="history-title">Uso y disponibilidad en el tiempo.</h2>
           </div>
           <div class="host-history__ranges" role="group" aria-label="Rango histórico">
             <button
@@ -184,10 +187,10 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
             La actualización histórica falló; se conserva la consulta anterior.
           </p>
           <p class="host-history__resolution">
-            Resolución recibida: <strong>{{ history.data.value.resolution }}</strong
-            >. Los datos ausentes no se rellenan.
+            {{ resolutionLabel(history.data.value.resolution) }}. Los periodos sin datos se
+            mantienen como huecos.
           </p>
-          <div class="host-history__grid">
+          <div v-if="hasHistoryPoints" class="host-history__grid">
             <HistoricalChart
               v-for="series in historySeries"
               :key="`${series.key}-${series.filesystem_id ?? 'host'}`"
@@ -197,6 +200,10 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
               :gap-threshold-seconds="historyGapThreshold"
             />
           </div>
+          <p v-else class="host-history__empty">
+            No hay muestras en este periodo. Prueba con un rango más amplio o espera a la próxima
+            actualización.
+          </p>
         </template>
       </section>
       <FilesystemList
@@ -218,7 +225,7 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
   border-inline: 1px solid var(--line-soft);
 }
 .host-detail__hero {
-  min-height: 32rem;
+  min-height: 25rem;
   padding: clamp(3rem, 8vw, 7rem) var(--page-gutter);
 }
 .host-detail__back {
@@ -228,7 +235,7 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
   text-transform: uppercase;
 }
 .host-detail__eyebrow {
-  margin: 5rem 0 1rem;
+  margin: 3.5rem 0 1rem;
   color: var(--accent-text);
   font: 800 0.7rem var(--font-mono);
   letter-spacing: 0.14em;
@@ -245,7 +252,7 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem 1.5rem;
-  margin-top: 3rem;
+  margin-top: 2rem;
   font: 800 0.65rem var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -373,6 +380,15 @@ async function updateFilesystem(filesystem: Filesystem, selected: boolean) {
 }
 .host-history__resolution strong {
   color: var(--accent-text);
+}
+.host-history__empty {
+  min-height: 12rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  padding: 2rem;
+  color: var(--ink-muted);
+  text-align: center;
 }
 .host-history__grid {
   display: grid;

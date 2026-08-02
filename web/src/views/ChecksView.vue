@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import PageIntro from '@/components/ui/PageIntro.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useAuth } from '@/auth/useAuth'
 import { useHostPolling } from '@/composables/useHostPolling'
 import {
@@ -11,9 +12,12 @@ import {
   type CheckInput,
   type CheckType,
 } from '@/checks/api'
+import { checkStateLabel, checkStateTone, formatDateTime } from '@/ui/labels'
 
 const auth = useAuth()
 const showCreate = ref(false)
+const showArchived = ref(false)
+const archiveTarget = ref<Check | null>(null)
 const busy = ref('')
 const error = ref('')
 const form = reactive<CheckInput>({
@@ -35,6 +39,9 @@ const polling = useHostPolling(async (signal) => {
 })
 
 const checks = computed(() => polling.data.value ?? [])
+const visibleChecks = computed(() =>
+  checks.value.filter((check) => (showArchived.value ? check.archived : !check.archived)),
+)
 
 function setType(type: CheckType) {
   form.type = type
@@ -78,7 +85,8 @@ async function save() {
     resetForm()
     polling.restart()
   } catch {
-    error.value = 'No se pudo crear el check. Revisa el destino, el timeout y la política de red.'
+    error.value =
+      'No se pudo crear el servicio. Revisa el destino, el tiempo de espera y la política de red.'
   } finally {
     busy.value = ''
   }
@@ -91,10 +99,28 @@ async function updateState(check: Check, action: 'enable' | 'disable' | 'archive
     await changeCheckState(auth.mutate, check, action)
     polling.restart()
   } catch {
-    error.value = 'No se pudo actualizar el estado. La versión pudo cambiar en otra sesión.'
+    error.value = 'No se pudo actualizar el servicio; la configuración pudo cambiar en otra sesión.'
   } finally {
     busy.value = ''
   }
+}
+
+function requestStateChange(check: Check, action: 'enable' | 'disable' | 'archive' | 'restore') {
+  if (action === 'archive') {
+    archiveTarget.value = check
+    return
+  }
+  void updateState(check, action)
+}
+
+function cancelArchive() {
+  archiveTarget.value = null
+}
+
+async function confirmArchive() {
+  const check = archiveTarget.value
+  archiveTarget.value = null
+  if (check) await updateState(check, 'archive')
 }
 
 onMounted(() => polling.refresh())
@@ -104,14 +130,14 @@ onMounted(() => polling.refresh())
   <main id="main-content" class="checks route-view" tabindex="-1">
     <section class="checks__hero">
       <PageIntro
-        index="04"
-        eyebrow="Checks / señal de servicio"
-        title="Pregunta si sigue vivo."
-        copy="HTTP y TCP salen desde este servidor, solo hacia la tailnet o los CIDRs privados autorizados. Los resultados programados alimentan estado e histórico; las pruebas manuales quedan separadas."
+        eyebrow="Servicios"
+        title="Servicios monitorizados."
+        copy="Comprueba disponibilidad HTTP, HTTPS y TCP desde este servidor. Los destinos sólo pueden pertenecer a tu tailnet o a redes privadas autorizadas."
       />
       <aside class="checks__hero-rail">
-        <span>Inventario</span><strong>{{ checks.length }} checks</strong><span>Origen</span
-        ><strong>Servidor central</strong>
+        <span>Servicios</span
+        ><strong>{{ checks.filter((check) => !check.archived).length }} activos</strong>
+        <span>Actualización</span><strong>Automática</strong>
       </aside>
     </section>
 
@@ -120,156 +146,173 @@ onMounted(() => polling.refresh())
     <section class="checks__workspace" aria-labelledby="checks-title">
       <header class="checks__heading">
         <div>
-          <p class="checks__eyebrow">01 / Servicios</p>
-          <h2 id="checks-title">Vigilancia configurable</h2>
+          <p class="checks__eyebrow">Servicios configurados</p>
+          <h2 id="checks-title">Disponibilidad de tus servicios.</h2>
         </div>
-        <button class="primary-button" type="button" @click="showCreate = !showCreate">
-          {{ showCreate ? 'Cerrar formulario' : 'Nuevo check' }}
-        </button>
+        <div class="checks__heading-actions">
+          <div class="checks__filters" role="group" aria-label="Filtro de servicios">
+            <button type="button" :aria-pressed="!showArchived" @click="showArchived = false">
+              Activos
+            </button>
+            <button type="button" :aria-pressed="showArchived" @click="showArchived = true">
+              Archivados
+            </button>
+          </div>
+          <button class="primary-button" type="button" @click="showCreate = !showCreate">
+            {{ showCreate ? 'Cerrar formulario' : 'Agregar servicio' }}
+          </button>
+        </div>
       </header>
 
       <form v-if="showCreate" class="check-form" @submit.prevent="save">
-        <label>Nombre<input v-model.trim="form.name" maxlength="128" required /></label>
         <label
-          >Tipo<select v-model="form.type" @change="setType(form.type)">
-            <option value="http">HTTP</option>
+          >Nombre del servicio<input v-model.trim="form.name" maxlength="128" required
+        /></label>
+        <label>
+          Tipo de comprobación
+          <select v-model="form.type" @change="setType(form.type)">
+            <option value="http">HTTP / HTTPS</option>
             <option value="tcp">TCP</option>
-          </select></label
-        >
-        <label v-if="form.type === 'http'" class="check-form__wide"
-          >URL<input v-model.trim="form.url" type="url" required
-        /></label>
-        <label v-else>Host<input v-model.trim="form.host" required /></label>
-        <label v-if="form.type === 'tcp'"
-          >Puerto<input v-model.number="form.port" type="number" min="1" max="65535" required
-        /></label>
-        <label
-          >Intervalo (s)<input
+          </select>
+        </label>
+        <label v-if="form.type === 'http'" class="check-form__wide">
+          URL del servicio<input v-model.trim="form.url" type="url" required />
+        </label>
+        <label v-else>Host del servicio<input v-model.trim="form.host" required /></label>
+        <label v-if="form.type === 'tcp'">
+          Puerto TCP<input v-model.number="form.port" type="number" min="1" max="65535" required />
+        </label>
+        <label>
+          Intervalo de consulta (segundos)
+          <input
             v-model.number="form.interval_seconds"
             type="number"
             min="15"
             max="3600"
             required
-        /></label>
-        <label
-          >Timeout (s)<input
-            v-model.number="form.timeout_seconds"
-            type="number"
-            min="1"
-            max="60"
-            required
-        /></label>
+          />
+        </label>
+        <label>
+          Tiempo de espera (segundos)
+          <input v-model.number="form.timeout_seconds" type="number" min="1" max="60" required />
+        </label>
         <template v-if="form.type === 'http'">
-          <label
-            >Status mínimo<input
+          <label>
+            Código HTTP mínimo
+            <input
               v-model.number="form.expected_status_min"
               type="number"
               min="100"
               max="599"
               required
-          /></label>
-          <label
-            >Status máximo<input
+            />
+          </label>
+          <label>
+            Código HTTP máximo
+            <input
               v-model.number="form.expected_status_max"
               type="number"
               min="100"
               max="599"
               required
-          /></label>
-          <label class="check-form__check"
-            ><input v-model="form.follow_redirects" type="checkbox" /> Seguir redirects</label
-          >
-          <label
-            >Máximo redirects<input
-              v-model.number="form.max_redirects"
-              type="number"
-              min="1"
-              max="3"
-              required
-          /></label>
+            />
+          </label>
+          <label class="check-form__check">
+            <input v-model="form.follow_redirects" type="checkbox" /> Seguir redirecciones
+          </label>
+          <label>
+            Máximo de redirecciones
+            <input v-model.number="form.max_redirects" type="number" min="1" max="3" required />
+          </label>
         </template>
         <button
           class="primary-button check-form__submit"
           type="submit"
           :disabled="busy === 'create'"
         >
-          {{ busy === 'create' ? 'Creando…' : 'Crear check' }}
+          {{ busy === 'create' ? 'Creando…' : 'Agregar servicio' }}
         </button>
       </form>
 
-      <p v-if="polling.loading.value" class="checks__empty" role="status">Cargando checks…</p>
+      <p v-if="polling.loading.value" class="checks__empty" role="status">Cargando servicios…</p>
       <p v-else-if="polling.error.value" class="checks__empty" role="alert">
-        No pudimos consultar los checks.
+        No pudimos consultar los servicios.
         <button type="button" @click="polling.refresh">Reintentar</button>
       </p>
-      <p v-else-if="checks.length === 0" class="checks__empty">
-        Todavía no hay checks. Añade el primer servicio desde este panel.
+      <p v-else-if="visibleChecks.length === 0" class="checks__empty">
+        {{ showArchived ? 'No hay servicios archivados.' : 'Todavía no hay servicios activos.' }}
       </p>
       <div v-else class="check-list">
-        <article v-for="check in checks" :key="check.id" class="check-card">
+        <article
+          v-for="check in visibleChecks"
+          :key="check.id"
+          class="check-card"
+          :class="{ 'check-card--archived': check.archived }"
+        >
           <header class="check-card__header">
             <div>
-              <p class="checks__eyebrow">{{ check.type.toUpperCase() }} / v{{ check.version }}</p>
+              <p class="checks__eyebrow">{{ check.type === 'http' ? 'HTTP / HTTPS' : 'TCP' }}</p>
               <h3>
-                <RouterLink :to="{ name: 'check-detail', params: { id: check.id } }">{{
-                  check.name
-                }}</RouterLink>
+                <RouterLink :to="{ name: 'check-detail', params: { id: check.id } }">
+                  {{ check.name }}
+                </RouterLink>
               </h3>
-              <code>{{ check.url || `${check.host}:${check.port}` }}</code>
+              <code>{{ check.url || check.host + ':' + check.port }}</code>
             </div>
-            <span class="check-state" :class="`check-state--${check.observed_state}`"
-              ><i aria-hidden="true"></i>{{ check.observed_state }}</span
+            <span
+              class="check-state"
+              :data-tone="checkStateTone(check.observed_state, check.stale)"
             >
+              <i aria-hidden="true"></i>{{ checkStateLabel(check.observed_state, check.stale) }}
+            </span>
           </header>
           <dl class="check-card__facts">
             <div>
               <dt>Cadencia</dt>
-              <dd>{{ check.interval_seconds }}s / {{ check.timeout_seconds }}s</dd>
+              <dd>Cada {{ check.interval_seconds }} s · espera {{ check.timeout_seconds }} s</dd>
             </div>
             <div>
               <dt>Último resultado</dt>
               <dd>
-                {{
-                  check.last_result_at
-                    ? new Date(check.last_result_at).toLocaleString('es-CL')
-                    : 'Sin señal'
-                }}
+                {{ check.last_result_at ? formatDateTime(check.last_result_at) : 'Sin resultados' }}
               </dd>
             </div>
             <div>
               <dt>Latencia</dt>
-              <dd>{{ check.last_latency_ms === null ? '—' : `${check.last_latency_ms} ms` }}</dd>
+              <dd>
+                {{ check.last_latency_ms === null ? 'Sin dato' : check.last_latency_ms + ' ms' }}
+              </dd>
             </div>
             <div>
-              <dt>Fallos seguidos</dt>
+              <dt>Fallos consecutivos</dt>
               <dd>{{ check.consecutive_failures }}</dd>
             </div>
           </dl>
           <footer class="check-card__actions">
             <RouterLink :to="{ name: 'check-detail', params: { id: check.id } }"
-              >Abrir detalle</RouterLink
+              >Ver detalle</RouterLink
             >
             <button
               v-if="check.enabled"
               type="button"
               :disabled="busy === check.id"
-              @click="updateState(check, 'disable')"
+              @click="requestStateChange(check, 'disable')"
             >
-              Desactivar
+              Pausar
             </button>
             <button
               v-else-if="!check.archived"
               type="button"
               :disabled="busy === check.id"
-              @click="updateState(check, 'enable')"
+              @click="requestStateChange(check, 'enable')"
             >
-              Activar
+              Reanudar
             </button>
             <button
               v-if="check.archived"
               type="button"
               :disabled="busy === check.id"
-              @click="updateState(check, 'restore')"
+              @click="requestStateChange(check, 'restore')"
             >
               Restaurar
             </button>
@@ -277,7 +320,7 @@ onMounted(() => polling.refresh())
               v-else
               type="button"
               :disabled="busy === check.id"
-              @click="updateState(check, 'archive')"
+              @click="requestStateChange(check, 'archive')"
             >
               Archivar
             </button>
@@ -285,6 +328,20 @@ onMounted(() => polling.refresh())
         </article>
       </div>
     </section>
+
+    <ConfirmDialog
+      :open="archiveTarget !== null"
+      title="Archivar servicio"
+      :copy="
+        archiveTarget
+          ? 'El histórico se conservará, pero el servicio dejará de ejecutarse y de generar alertas.'
+          : ''
+      "
+      confirm-label="Archivar servicio"
+      danger
+      @cancel="cancelArchive"
+      @confirm="confirmArchive"
+    />
   </main>
 </template>
 
@@ -300,7 +357,7 @@ onMounted(() => polling.refresh())
   border-bottom: 1px solid var(--line-strong);
 }
 .checks__hero :deep(.page-intro) {
-  padding: clamp(4rem, 8vw, 7rem) var(--page-gutter);
+  padding: clamp(3.5rem, 7vw, 6rem) var(--page-gutter);
 }
 .checks__hero-rail {
   display: flex;
@@ -325,7 +382,7 @@ onMounted(() => polling.refresh())
   color: var(--accent-text);
 }
 .checks__workspace {
-  padding: clamp(2rem, 6vw, 5rem) var(--page-gutter) clamp(4rem, 9vw, 8rem);
+  padding: clamp(2rem, 5vw, 4rem) var(--page-gutter) clamp(4rem, 8vw, 7rem);
 }
 .checks__heading,
 .check-card__header,
@@ -334,6 +391,31 @@ onMounted(() => polling.refresh())
   justify-content: space-between;
   gap: 1rem;
   align-items: start;
+}
+.checks__heading-actions {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 0.75rem;
+}
+.checks__filters {
+  display: flex;
+  gap: 0.35rem;
+}
+.checks__filters button {
+  min-height: 2.75rem;
+  border: 1px solid var(--line-strong);
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  color: var(--ink);
+  font: 800 0.64rem var(--font-mono);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.checks__filters button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
 }
 .checks__eyebrow {
   margin: 0 0 0.65rem;
@@ -356,6 +438,9 @@ onMounted(() => polling.refresh())
   border: 1px solid var(--line-strong);
   background: var(--surface);
   padding: 1.25rem;
+}
+.check-card--archived {
+  opacity: 0.72;
 }
 .check-card h3 {
   margin: 0 0 0.45rem;
@@ -383,11 +468,14 @@ onMounted(() => polling.refresh())
   border-radius: 50%;
   background: var(--ink-muted);
 }
-.check-state--up i {
+.check-state[data-tone='success'] i {
   background: var(--signal);
 }
-.check-state--down i {
+.check-state[data-tone='danger'] i {
   background: var(--accent-text);
+}
+.check-state[data-tone='warning'] i {
+  background: #8a5a00;
 }
 .check-card__facts {
   display: grid;
@@ -490,6 +578,19 @@ onMounted(() => polling.refresh())
   }
   .check-card__facts {
     grid-template-columns: 1fr;
+  }
+  .checks__heading-actions {
+    width: 100%;
+    justify-content: start;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .checks__filters {
+    width: 100%;
+  }
+  .checks__filters button,
+  .checks__heading-actions .primary-button {
+    flex: 1;
   }
 }
 </style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import PageIntro from '@/components/ui/PageIntro.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useHostPolling } from '@/composables/useHostPolling'
 import { useAuth } from '@/auth/useAuth'
 import { getRetentionSettings, updateRetentionSettings } from '@/settings/api'
@@ -14,6 +15,13 @@ const privateCIDRs = ref('')
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
+const pendingPatch = ref<{
+  raw_retention_seconds: number
+  rollup_retention_seconds: number
+  check_interval_seconds: number
+  check_timeout_seconds: number
+  allowed_private_cidrs: string[]
+} | null>(null)
 const settings = useHostPolling(async (signal) => {
   const result = await getRetentionSettings(signal)
   if (!result.data) throw new Error('settings missing')
@@ -33,23 +41,27 @@ watch(
   { immediate: true },
 )
 
-async function save() {
-  if (!settings.data.value) return
+function buildPatch() {
+  return {
+    raw_retention_seconds: Math.round(rawHours.value * 3600),
+    rollup_retention_seconds: Math.round(rollupDays.value * 86400),
+    check_interval_seconds: Number(checkInterval.value),
+    check_timeout_seconds: Number(checkTimeout.value),
+    allowed_private_cidrs: privateCIDRs.value
+      .split(/[\s,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+  }
+}
+
+async function persist(patch: ReturnType<typeof buildPatch>) {
   busy.value = true
   error.value = ''
   success.value = ''
   try {
-    await updateRetentionSettings(auth.mutate, settings.data.value, {
-      raw_retention_seconds: Math.round(rawHours.value * 3600),
-      rollup_retention_seconds: Math.round(rollupDays.value * 86400),
-      check_interval_seconds: Number(checkInterval.value),
-      check_timeout_seconds: Number(checkTimeout.value),
-      allowed_private_cidrs: privateCIDRs.value
-        .split(/[\s,]+/)
-        .map((value) => value.trim())
-        .filter(Boolean),
-    })
-    success.value = 'Retención guardada. Se aplicará en el siguiente ciclo de mantenimiento.'
+    if (!settings.data.value) return
+    await updateRetentionSettings(auth.mutate, settings.data.value, patch)
+    success.value = 'Configuración guardada. Se aplicará en el siguiente ciclo de mantenimiento.'
     settings.restart()
   } catch {
     error.value = 'No se pudo guardar. Revisa los rangos o vuelve a cargar la configuración.'
@@ -57,42 +69,60 @@ async function save() {
     busy.value = false
   }
 }
+
+async function save() {
+  if (!settings.data.value) return
+  const patch = buildPatch()
+  const reducesRecentData = patch.raw_retention_seconds < settings.data.value.raw_retention_seconds
+  const reducesHistory =
+    patch.rollup_retention_seconds < settings.data.value.rollup_retention_seconds
+  if (reducesRecentData || reducesHistory) {
+    pendingPatch.value = patch
+    return
+  }
+  await persist(patch)
+}
+
+async function confirmRetentionChange() {
+  const patch = pendingPatch.value
+  pendingPatch.value = null
+  if (patch) await persist(patch)
+}
 </script>
 
 <template>
   <main id="main-content" class="settings route-view" tabindex="-1">
     <section class="settings__intro">
       <PageIntro
-        index="04"
-        eyebrow="Configuración / política de señal"
-        title="Conservar la señal justa."
-        copy="Define retención, cadencia y redes privadas autorizadas. Los checks nunca salen a destinos públicos por defecto; los cambios de red se validan antes de cada conexión."
+        eyebrow="Configuración"
+        title="Ajusta cómo trabaja Atalaya."
+        copy="Define cuánto histórico conservar y los valores predeterminados para nuevos servicios. Las conexiones a destinos privados se validan antes de cada comprobación."
       />
     </section>
     <section class="settings__workspace" aria-labelledby="retention-title">
       <aside class="settings__aside">
         <p>Política de datos</p>
-        <h2>Retención y egress.</h2>
+        <h2>Conserva lo que necesitas.</h2>
         <p>
-          La base almacena UTC. Los gráficos eligen automáticamente la resolución y conservan los
-          huecos de recepción.
+          Los gráficos eligen automáticamente cómo presentar el histórico y mantienen visibles los
+          periodos sin datos.
         </p>
       </aside>
       <div class="settings__panel">
-        <p class="settings__eyebrow">01 / Retención</p>
-        <h2 id="retention-title">Ventanas históricas</h2>
+        <p class="settings__eyebrow">Datos e intervalos</p>
+        <h2 id="retention-title">Ventanas históricas.</h2>
         <p v-if="settings.loading.value" role="status">Consultando configuración…</p>
         <p v-else-if="settings.error.value && !settings.data.value" role="alert">
           No pudimos leer la configuración.
         </p>
         <form v-else @submit.prevent="save">
           <label>
-            Muestras crudas (horas)
+            Muestras recientes (horas)
             <input v-model.number="rawHours" type="number" min="24" max="720" step="1" required />
             <small>Entre 24 horas y 30 días.</small>
           </label>
           <label>
-            Intervalo por defecto de checks (segundos)
+            Intervalo predeterminado de servicios (segundos)
             <input
               v-model.number="checkInterval"
               type="number"
@@ -101,22 +131,22 @@ async function save() {
               step="1"
               required
             />
-            <small>Entre 15 segundos y 1 hora. Se usa al crear un check.</small>
+            <small>Entre 15 segundos y 1 hora. Se usa al crear un servicio.</small>
           </label>
           <label>
-            Timeout por defecto de checks (segundos)
+            Tiempo de espera predeterminado (segundos)
             <input v-model.number="checkTimeout" type="number" min="1" max="60" step="1" required />
             <small>Debe ser menor que el intervalo.</small>
           </label>
           <label>
-            CIDRs privados autorizados
+            Redes privadas autorizadas (CIDR)
             <textarea v-model="privateCIDRs" rows="4" placeholder="192.168.1.0/24\n10.20.0.0/16" />
-            <small>Uno por línea. RFC1918 solamente; Tailscale se permite por defecto.</small>
+            <small>Una red por línea. Tailscale se permite por defecto.</small>
           </label>
           <label>
-            Agregados horarios (días)
+            Histórico agregado (días)
             <input v-model.number="rollupDays" type="number" min="7" max="730" step="1" required />
-            <small>Debe ser igual o mayor que la retención raw.</small>
+            <small>Debe cubrir al menos el periodo de muestras recientes.</small>
           </label>
           <p v-if="error" class="settings__message settings__message--error" role="alert">
             {{ error }}
@@ -125,11 +155,20 @@ async function save() {
             {{ success }}
           </p>
           <button type="submit" :disabled="busy">
-            {{ busy ? 'Guardando…' : 'Guardar retención' }}
+            {{ busy ? 'Guardando…' : 'Guardar configuración' }}
           </button>
         </form>
       </div>
     </section>
+    <ConfirmDialog
+      :open="pendingPatch !== null"
+      title="¿Reducir el histórico?"
+      copy="Los datos fuera del nuevo periodo se eliminarán durante el mantenimiento. Esta acción no se puede deshacer."
+      confirm-label="Reducir histórico"
+      danger
+      @confirm="confirmRetentionChange"
+      @cancel="pendingPatch = null"
+    />
   </main>
 </template>
 
@@ -140,7 +179,7 @@ async function save() {
   border-inline: 1px solid var(--line-soft);
 }
 .settings__intro {
-  padding: clamp(4rem, 8vw, 7rem) var(--page-gutter);
+  padding: clamp(3rem, 6vw, 5rem) var(--page-gutter);
   border-bottom: 1px solid var(--line-strong);
 }
 .settings__workspace {
@@ -150,7 +189,7 @@ async function save() {
 }
 .settings__aside,
 .settings__panel {
-  min-height: 31rem;
+  min-height: 24rem;
   border: 1px solid var(--line-strong);
   padding: clamp(1.25rem, 3vw, 2rem);
 }

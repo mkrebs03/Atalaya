@@ -109,7 +109,7 @@ describe('HostDetailView resource cache', () => {
     expect(metricRequests).toHaveLength(2)
     expect(metricRequests[0]).toContain('resolution=auto')
     expect(metricRequests[1]).toContain('resolution=hourly')
-    expect(wrapper.text()).toContain('Resolución recibida: hourly')
+    expect(wrapper.text()).toContain('Datos agregados.')
     wrapper.unmount()
   })
 })

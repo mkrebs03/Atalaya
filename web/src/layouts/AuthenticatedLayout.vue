@@ -35,8 +35,14 @@ const incidentTone = computed<'critical' | 'warning'>(() =>
 )
 const incidentSummary = computed(() => {
   const parts: string[] = []
-  if (criticalIncidentCount.value) parts.push(`${criticalIncidentCount.value} critical`)
-  if (warningIncidentCount.value) parts.push(`${warningIncidentCount.value} warning`)
+  if (criticalIncidentCount.value)
+    parts.push(
+      `${criticalIncidentCount.value} alerta${criticalIncidentCount.value === 1 ? '' : 's'} crítica${criticalIncidentCount.value === 1 ? '' : 's'}`,
+    )
+  if (warningIncidentCount.value)
+    parts.push(
+      `${warningIncidentCount.value} advertencia${warningIncidentCount.value === 1 ? '' : 's'}`,
+    )
   if (pendingRules.value.length) parts.push(`${pendingRules.value.length} pendientes`)
   return `${parts.join(' · ')} requieren atención`
 })
@@ -77,13 +83,13 @@ async function signOut() {
       role="status"
       aria-live="polite"
     >
-      <span>{{ incidentTone === 'critical' ? 'Semáforo rojo' : 'Semáforo amarillo' }}</span
+      <span>{{ incidentTone === 'critical' ? 'Atención crítica' : 'Atención' }}</span
       >{{ incidentSummary }}
     </RouterLink>
     <RouterView />
     <footer class="shell-footer">
-      <p>Atalaya / observabilidad privada</p>
-      <p>Fase 06 · operación, instalador y releases</p>
+      <p>Atalaya · monitorización privada</p>
+      <p>Datos protegidos dentro de tu red Tailscale</p>
     </footer>
   </div>
 </template>

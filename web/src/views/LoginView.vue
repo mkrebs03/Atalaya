@@ -37,30 +37,28 @@ async function submit(username: string, password: string) {
     <section class="login__story" aria-labelledby="login-title">
       <div class="login__masthead">
         <AtalayaMark />
-        <p>Fase 01 / acceso seguro</p>
+        <p>Monitorización privada</p>
       </div>
-      <div class="login__index" aria-hidden="true">01</div>
       <div class="login__intro">
-        <p class="login__kicker">Puesto de observación privado</p>
-        <h1 id="login-title" class="login__title">La torre está cerrada por dentro.</h1>
+        <p class="login__kicker">Atalaya</p>
+        <h1 id="login-title" class="login__title">Observa tu infraestructura.</h1>
         <p class="login__copy">
-          Entra con la cuenta local para observar y administrar la infraestructura accesible desde
-          tu tailnet.
+          Inicia sesión para consultar el estado de tus hosts y servicios desde tu red privada.
         </p>
       </div>
-      <p class="login__classification">Private observability / local administrator</p>
+      <p class="login__classification">Acceso local protegido</p>
     </section>
 
     <section class="login__access" aria-label="Acceso a Atalaya">
-      <div class="login__access-header"><span>01</span><span>Credenciales</span></div>
+      <div class="login__access-header"><span>Acceso seguro</span><span>Cuenta local</span></div>
       <div class="login__form-panel">
         <p class="login__eyebrow">Administración local</p>
-        <h2 class="login__form-title">Acceso a Atalaya</h2>
-        <p class="login__form-copy">La sesión se mantiene únicamente mediante una cookie segura.</p>
+        <h2 class="login__form-title">Iniciar sesión</h2>
+        <p class="login__form-copy">Tu sesión se mantiene de forma segura en este navegador.</p>
         <LoginForm :busy="busy" :error="error" @submit="submit" />
       </div>
       <div class="login__access-footer">
-        <span>Sesión local</span><span>Sin almacenamiento en navegador</span>
+        <span>Sesión protegida</span><span>Red privada Tailscale</span>
       </div>
     </section>
   </main>
@@ -75,7 +73,7 @@ async function submit(username: string, password: string) {
 .login__story {
   min-height: 100svh;
   display: grid;
-  grid-template-columns: minmax(6rem, 0.28fr) minmax(0, 1fr);
+  grid-template-columns: 1fr;
   grid-template-rows: auto 1fr auto;
   position: relative;
   border-right: 1px solid var(--line-strong);
@@ -146,6 +144,7 @@ async function submit(username: string, password: string) {
   margin: 0;
   font: 600 clamp(3.5rem, 6.8vw, 7.5rem) / 0.84 var(--font-display);
   letter-spacing: -0.06em;
+  overflow-wrap: anywhere;
 }
 .login__copy {
   max-width: 38rem;
@@ -243,7 +242,7 @@ async function submit(username: string, password: string) {
     padding: 4rem 1.25rem 3rem;
   }
   .login__title {
-    font-size: clamp(3.2rem, 15vw, 5.1rem);
+    font-size: clamp(2.9rem, 13vw, 4.6rem);
   }
   .login__copy {
     padding-left: 1rem;

@@ -35,9 +35,9 @@ describe('HostSummaryCard states', () => {
   for (const [state, stale, tone, label] of [
     ['healthy', false, 'success', 'Saludable'],
     ['degraded', false, 'warning', 'Degradado'],
-    ['unreachable', false, 'danger', 'Sin alcance'],
-    ['unknown', false, 'neutral', 'Esperando señal'],
-    ['healthy', true, 'warning', 'Señal vencida'],
+    ['unreachable', false, 'danger', 'Sin conexión'],
+    ['unknown', false, 'neutral', 'Sin datos'],
+    ['healthy', true, 'warning', 'Datos desactualizados'],
   ] as const) {
     it(`renders ${state}${stale ? ' stale' : ''} with its normative tone`, async () => {
       const router = createRouter({

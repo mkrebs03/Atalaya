@@ -40,7 +40,7 @@ export default defineConfig({
   webServer: {
     command: serverCommand,
     url: baseURL,
-    reuseExistingServer: false,
+    reuseExistingServer: process.env.ATALAYA_E2E_REUSE_SERVER === 'true',
     timeout: 30_000,
   },
 })

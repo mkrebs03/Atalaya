@@ -50,7 +50,7 @@ describe('HostCurrentMetrics', () => {
       addresses: ['100.64.0.10'],
     }
     const wrapper = mount(HostCurrentMetrics, { props: { host: connected } })
-    expect(wrapper.text()).toContain('Hostname · oracle.tailnet.ts.net')
+    expect(wrapper.text()).toContain('Nombre · oracle.tailnet.ts.net')
     expect(wrapper.text()).toContain('Direcciones · 100.64.0.10')
   })
 })

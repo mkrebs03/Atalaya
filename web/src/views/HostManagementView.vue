@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import PageIntro from '@/components/ui/PageIntro.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useAuth } from '@/auth/useAuth'
 import { listAllHostsIncludingArchived, type HostSummary } from '@/hosts/api'
-import { formatDate } from '@/hosts/format'
 import {
   changeHostState,
   createEnrollmentToken,
@@ -13,6 +13,7 @@ import {
   type EnrollmentToken,
   type NewEnrollmentToken,
 } from '@/hosts/management'
+import { formatDateTime, hostStateLabel } from '@/ui/labels'
 
 const auth = useAuth()
 const hosts = ref<HostSummary[]>([])
@@ -22,9 +23,33 @@ const label = ref('')
 const loading = ref(true)
 const busy = ref('')
 const error = ref('')
+const showArchived = ref(false)
+const archiveTarget = ref<HostSummary | null>(null)
+const revokeTarget = ref<EnrollmentToken | null>(null)
+const copyState = ref('')
 const drafts = reactive<Record<string, { displayName: string; interval: number; timeout: number }>>(
   {},
 )
+
+const visibleHosts = computed(() =>
+  showArchived.value ? hosts.value : hosts.value.filter((host) => !host.archived),
+)
+
+function administrativeStateLabel(host: HostSummary) {
+  if (host.archived) return 'Archivado'
+  return {
+    pending: 'Pendiente',
+    active: 'Activo',
+    disabled: 'Pausado',
+  }[host.administrative_state]
+}
+
+function tokenStateLabel(token: EnrollmentToken) {
+  if (token.revoked_at) return 'Revocado'
+  if (token.consumed_at) return 'Usado'
+  if (new Date(token.expires_at).getTime() <= Date.now()) return 'Expirado'
+  return 'Disponible'
+}
 
 function syncDraft(host: HostSummary) {
   drafts[host.id] = {
@@ -66,6 +91,10 @@ async function issueToken() {
   }
 }
 
+function requestRevokeToken(token: EnrollmentToken) {
+  revokeTarget.value = token
+}
+
 async function revokeToken(token: EnrollmentToken) {
   busy.value = `token:${token.id}`
   error.value = ''
@@ -76,6 +105,16 @@ async function revokeToken(token: EnrollmentToken) {
     error.value = 'No se pudo revocar el token.'
   } finally {
     busy.value = ''
+  }
+}
+
+async function copyToken() {
+  if (!newToken.value) return
+  try {
+    await navigator.clipboard.writeText(newToken.value.token)
+    copyState.value = 'Copiado'
+  } catch {
+    copyState.value = 'Selecciona el token para copiarlo manualmente'
   }
 }
 
@@ -114,6 +153,26 @@ async function updateState(
   }
 }
 
+function requestHostState(host: HostSummary, action: 'enable' | 'disable' | 'archive' | 'restore') {
+  if (action === 'archive') {
+    archiveTarget.value = host
+    return
+  }
+  void updateState(host, action)
+}
+
+function confirmArchive() {
+  const host = archiveTarget.value
+  archiveTarget.value = null
+  if (host) void updateState(host, 'archive')
+}
+
+function confirmRevoke() {
+  const token = revokeTarget.value
+  revokeTarget.value = null
+  if (token) void revokeToken(token)
+}
+
 onMounted(refresh)
 </script>
 
@@ -121,10 +180,9 @@ onMounted(refresh)
   <main id="main-content" class="management route-view" tabindex="-1">
     <section class="management__hero">
       <PageIntro
-        index="03"
-        eyebrow="Administración / control plane"
-        title="Decide qué sigue en vigilancia."
-        copy="Crea enrolamientos de un solo uso, ajusta la cadencia de cada host y conserva archivados los recursos que ya no deben aparecer en el resumen operativo."
+        eyebrow="Hosts"
+        title="Administra lo que vigilas."
+        copy="Agrega hosts con un token de un solo uso, ajusta sus comprobaciones y conserva los recursos archivados fuera de la operación diaria."
       />
     </section>
 
@@ -136,7 +194,7 @@ onMounted(refresh)
           <p class="management__eyebrow">Credenciales efímeras</p>
           <h2 id="tokens-title">Tokens de enrolamiento</h2>
         </div>
-        <span>TTL 15 min · uso único</span>
+        <span>Válido 15 minutos · un solo uso</span>
       </header>
       <form class="token-panel__form" @submit.prevent="issueToken">
         <label>
@@ -150,7 +208,10 @@ onMounted(refresh)
       <div v-if="newToken" class="token-panel__secret" role="status">
         <strong>Token visible una sola vez</strong>
         <code>{{ newToken.token }}</code>
-        <small>Guárdalo en un archivo 0600 y ejecuta <code>atalaya agent enroll</code>.</small>
+        <div class="token-panel__secret-actions">
+          <button type="button" @click="copyToken">{{ copyState || 'Copiar token' }}</button>
+          <small>Guárdalo de forma segura y úsalo al enrolar el agente.</small>
+        </div>
       </div>
       <p v-if="!loading && tokens.length === 0" class="management__empty">
         No hay tokens emitidos.
@@ -159,15 +220,16 @@ onMounted(refresh)
         <li v-for="token in tokens" :key="token.id">
           <div>
             <strong>{{ token.label || 'Sin etiqueta' }}</strong>
-            <small>Expira {{ formatDate(token.expires_at) }}</small>
+            <small>Expira {{ formatDateTime(token.expires_at) }}</small>
           </div>
-          <span v-if="token.revoked_at" class="token-list__state">Revocado</span>
-          <span v-else-if="token.consumed_at" class="token-list__state">Consumido</span>
+          <span class="token-list__state">{{ tokenStateLabel(token) }}</span>
           <button
-            v-else
+            v-if="
+              !token.revoked_at && !token.consumed_at && tokenStateLabel(token) === 'Disponible'
+            "
             type="button"
             :disabled="busy === `token:${token.id}`"
-            @click="revokeToken(token)"
+            @click="requestRevokeToken(token)"
           >
             Revocar
           </button>
@@ -181,21 +243,34 @@ onMounted(refresh)
           <p class="management__eyebrow">Inventario editable</p>
           <h2 id="hosts-management-title">Hosts y cadencias</h2>
         </div>
-        <span>{{ hosts.length }} recursos</span>
+        <div class="management__filters" role="group" aria-label="Filtro de hosts">
+          <button
+            type="button"
+            :class="{ 'is-active': !showArchived }"
+            @click="showArchived = false"
+          >
+            Activos
+          </button>
+          <button type="button" :class="{ 'is-active': showArchived }" @click="showArchived = true">
+            Archivados
+          </button>
+          <span>{{ visibleHosts.length }} visibles</span>
+        </div>
       </header>
       <p v-if="loading" class="management__empty" role="status">Cargando administración…</p>
-      <p v-else-if="hosts.length === 0" class="management__empty">No hay hosts enrolados.</p>
+      <p v-else-if="visibleHosts.length === 0" class="management__empty">
+        {{ showArchived ? 'No hay hosts archivados.' : 'No hay hosts activos.' }}
+      </p>
       <div v-else class="host-management-list">
-        <article v-for="host in hosts" :key="host.id" class="host-management-card">
+        <article v-for="host in visibleHosts" :key="host.id" class="host-management-card">
           <header>
             <div>
               <p class="management__eyebrow">
-                {{ host.archived ? 'Archivado' : host.administrative_state }}
+                {{ administrativeStateLabel(host) }} ·
+                {{ hostStateLabel(host.observed_state, host.stale) }}
               </p>
               <h3>{{ host.display_name }}</h3>
-              <code>{{ host.id }}</code>
             </div>
-            <span>v{{ host.version }}</span>
           </header>
           <form
             v-if="drafts[host.id]"
@@ -246,7 +321,7 @@ onMounted(refresh)
               v-if="host.archived"
               type="button"
               :disabled="busy === `host:${host.id}`"
-              @click="updateState(host, 'restore')"
+              @click="requestHostState(host, 'restore')"
             >
               Restaurar
             </button>
@@ -254,7 +329,7 @@ onMounted(refresh)
               v-else-if="host.administrative_state === 'disabled'"
               type="button"
               :disabled="busy === `host:${host.id}`"
-              @click="updateState(host, 'enable')"
+              @click="requestHostState(host, 'enable')"
             >
               Activar
             </button>
@@ -262,7 +337,7 @@ onMounted(refresh)
               v-else
               type="button"
               :disabled="busy === `host:${host.id}`"
-              @click="updateState(host, 'disable')"
+              @click="requestHostState(host, 'disable')"
             >
               Desactivar
             </button>
@@ -270,7 +345,7 @@ onMounted(refresh)
               v-if="!host.archived"
               type="button"
               :disabled="busy === `host:${host.id}`"
-              @click="updateState(host, 'archive')"
+              @click="requestHostState(host, 'archive')"
             >
               Archivar
             </button>
@@ -278,6 +353,25 @@ onMounted(refresh)
         </article>
       </div>
     </section>
+
+    <ConfirmDialog
+      :open="archiveTarget !== null"
+      title="¿Archivar este host?"
+      copy="Dejará de aparecer en el resumen y podrás restaurarlo desde la vista de hosts."
+      confirm-label="Archivar host"
+      danger
+      @confirm="confirmArchive"
+      @cancel="archiveTarget = null"
+    />
+    <ConfirmDialog
+      :open="revokeTarget !== null"
+      title="¿Revocar este token?"
+      copy="El token dejará de poder utilizarse para enrolar un agente."
+      confirm-label="Revocar token"
+      danger
+      @confirm="confirmRevoke"
+      @cancel="revokeTarget = null"
+    />
   </main>
 </template>
 
@@ -316,6 +410,31 @@ onMounted(refresh)
 .management__heading > span {
   color: var(--ink-muted);
   font: 800 0.65rem var(--font-mono);
+  text-transform: uppercase;
+}
+.management__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.management__filters button {
+  border: 1px solid var(--line-strong);
+  padding: 0.5rem 0.7rem;
+  background: transparent;
+  color: var(--ink);
+  font: 800 0.62rem var(--font-mono);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.management__filters button.is-active {
+  background: var(--ink);
+  color: var(--paper);
+}
+.management__filters span {
+  margin-left: 0.35rem;
+  color: var(--ink-muted);
+  font: 800 0.62rem var(--font-mono);
   text-transform: uppercase;
 }
 .management__eyebrow {
@@ -378,6 +497,21 @@ input {
 }
 .token-panel__secret small code {
   font-size: 0.75rem;
+}
+.token-panel__secret-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.token-panel__secret-actions button {
+  border: 1px solid var(--line-strong);
+  padding: 0.55rem 0.75rem;
+  background: var(--ink);
+  color: var(--paper);
+  font: 800 0.62rem var(--font-mono);
+  text-transform: uppercase;
+  cursor: pointer;
 }
 .token-list,
 .host-management-list {
@@ -466,6 +600,9 @@ button:disabled {
   .token-list li {
     align-items: start;
     flex-direction: column;
+  }
+  .management__filters {
+    margin-top: 1rem;
   }
 }
 </style>

@@ -610,8 +610,8 @@ revalida que el canal siga habilitado y no archivado; en caso contrario marca
 - `PATCH /api/v1/settings`
 - `GET /api/v1/system/status`
 
-Settings editables v1: retencion, defaults de intervalos, CIDRs privados permitidos
-para checks y zona horaria de presentacion. Los checks solo permiten Tailscale y esos
+Settings editables v1: retencion, defaults de intervalos y CIDRs privados permitidos
+para checks. Los checks solo permiten Tailscale y esos
 CIDRs; destinos publicos estan bloqueados por default. Base de datos sigue almacenando
 UTC.
 

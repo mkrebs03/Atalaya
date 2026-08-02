@@ -16,8 +16,8 @@ const emit = defineEmits<{ retry: [] }>()
   <section class="host-list" aria-labelledby="hosts-title" :aria-busy="loading || refreshing">
     <header class="host-list__heading">
       <div>
-        <p>Inventario / estado actual</p>
-        <h2 id="hosts-title">Señales bajo vigilancia.</h2>
+        <p>Hosts monitorizados</p>
+        <h2 id="hosts-title">Estado actual.</h2>
       </div>
       <span v-if="refreshing" role="status">Actualizando</span>
     </header>
@@ -27,8 +27,9 @@ const emit = defineEmits<{ retry: [] }>()
       <button type="button" @click="emit('retry')">Reintentar</button>
     </div>
     <div v-else-if="hosts.length === 0" class="host-list__status">
-      <p>Todavía no hay hosts listos para mostrar.</p>
-      <span>Completa el bootstrap del agente local para recibir la primera señal.</span>
+      <p>Todavía no hay hosts para mostrar.</p>
+      <span>Agrega el host local o enrola un servidor remoto para comenzar.</span>
+      <RouterLink class="host-list__status-link" to="/manage">Administrar hosts</RouterLink>
     </div>
     <template v-else>
       <p v-if="error" class="host-list__notice" role="alert">
@@ -98,6 +99,15 @@ const emit = defineEmits<{ retry: [] }>()
   color: var(--paper);
   font-weight: 800;
   cursor: pointer;
+}
+.host-list__status-link {
+  justify-self: center;
+  border: 1px solid var(--ink);
+  padding: 0.6rem 1rem;
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 800;
+  text-decoration: none;
 }
 .host-list__notice {
   border-left: 0.35rem solid var(--accent-surface);

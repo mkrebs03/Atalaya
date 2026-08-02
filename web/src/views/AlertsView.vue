@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import PageIntro from '@/components/ui/PageIntro.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useAuth } from '@/auth/useAuth'
 import { useHostPolling } from '@/composables/useHostPolling'
 import { listAllChecks } from '@/checks/api'
@@ -16,13 +17,25 @@ import {
   type AlertRuleInput,
   type AlertRuleType,
 } from '@/alerts/api'
+import {
+  alertRuleTypeLabel,
+  alertStateLabel,
+  alertStateTone,
+  formatDateTime,
+  metricLabel,
+  operatorLabel,
+  severityLabel,
+} from '@/ui/labels'
 
 const auth = useAuth()
 type ReadonlyAlertRule = {
   readonly [Key in keyof AlertRule]: Key extends 'channel_ids' ? readonly string[] : AlertRule[Key]
 }
 const showForm = ref(false)
+const showArchived = ref(false)
+const incidentView = ref<'open' | 'resolved'>('open')
 const editingRule = ref<ReadonlyAlertRule | null>(null)
+const archiveTarget = ref<ReadonlyAlertRule | null>(null)
 const busy = ref('')
 const error = ref('')
 const form = reactive({
@@ -62,16 +75,31 @@ const resourcesPolling = useHostPolling(async (signal) => {
 })
 
 const polling = useHostPolling(async (signal) => {
-  const [rulesResponse, incidentsResponse] = await Promise.all([
+  const [rulesResponse, openIncidentsResponse, resolvedIncidentsResponse] = await Promise.all([
     listAlertRules(signal, true),
     listIncidents(signal, 'open'),
+    listIncidents(signal, 'resolved'),
   ])
-  if (!rulesResponse.data || !incidentsResponse.data) throw new Error('alert response missing')
-  return { rules: rulesResponse.data.items ?? [], incidents: incidentsResponse.data.items ?? [] }
+  if (!rulesResponse.data || !openIncidentsResponse.data || !resolvedIncidentsResponse.data)
+    throw new Error('alert response missing')
+  return {
+    rules: rulesResponse.data.items ?? [],
+    openIncidents: openIncidentsResponse.data.items ?? [],
+    resolvedIncidents: resolvedIncidentsResponse.data.items ?? [],
+  }
 })
 
-const rules = computed(() => polling.data.value?.rules ?? [])
-const incidents = computed(() => polling.data.value?.incidents ?? [])
+const rules = computed(() => {
+  const allRules = polling.data.value?.rules ?? []
+  return showArchived.value
+    ? allRules.filter((rule) => rule.archived)
+    : allRules.filter((rule) => !rule.archived)
+})
+const incidents = computed(() =>
+  incidentView.value === 'open'
+    ? (polling.data.value?.openIncidents ?? [])
+    : (polling.data.value?.resolvedIncidents ?? []),
+)
 const hosts = computed(() => resourcesPolling.data.value?.hosts ?? [])
 const checks = computed(() => resourcesPolling.data.value?.checks ?? [])
 const channels = computed(() => resourcesPolling.data.value?.channels ?? [])
@@ -189,33 +217,55 @@ async function updateState(
   }
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString('es-CL')
+function requestArchive(rule: ReadonlyAlertRule) {
+  archiveTarget.value = rule
+}
+
+function confirmArchive() {
+  const rule = archiveTarget.value
+  archiveTarget.value = null
+  if (rule) void updateState(rule, 'archive')
 }
 
 function condition(rule: ReadonlyAlertRule) {
-  const targetID = rule.host_id ?? rule.check_id ?? rule.filesystem_id ?? 'sin target'
-  if (rule.type === 'host_unreachable') return `host ${targetID} · ${rule.for_seconds}s`
+  const target = resourceName(rule)
+  if (rule.type === 'host_unreachable')
+    return target + ' · sin respuesta durante ' + rule.for_seconds + 's'
   if (rule.type === 'check_failed')
     return rule.mode === 'attempts'
-      ? `check ${targetID} · ${rule.consecutive_failures} fallos`
-      : `check ${targetID} · ${rule.for_seconds}s`
+      ? target + ' · ' + rule.consecutive_failures + ' fallos seguidos'
+      : target + ' · con errores durante ' + rule.for_seconds + 's'
   if (rule.type === 'filesystem_threshold')
-    return `filesystem ${targetID} · ${rule.operator} ${rule.threshold}%`
-  return `host ${targetID} · ${rule.metric} ${rule.operator} ${rule.threshold}%`
+    return target + ' · uso ' + operatorLabel(rule.operator ?? 'gte') + ' ' + rule.threshold + '%'
+  return (
+    target +
+    ' · ' +
+    metricLabel(rule.metric ?? 'cpu_used_percent') +
+    ' ' +
+    operatorLabel(rule.operator ?? 'gte') +
+    ' ' +
+    rule.threshold +
+    '%'
+  )
 }
 
-function evaluationTone(rule: ReadonlyAlertRule) {
-  if (rule.archived || !rule.enabled) return 'paused'
-  return rule.evaluation?.state ?? 'inactive'
-}
-
-function evaluationLabel(rule: ReadonlyAlertRule) {
-  if (rule.archived) return 'Archivada'
-  if (!rule.enabled) return 'Pausada'
-  if (rule.evaluation?.state === 'pending') return 'Pendiente'
-  if (rule.evaluation?.state === 'firing') return 'En firing'
-  return 'Activa'
+function resourceName(rule: ReadonlyAlertRule) {
+  if (rule.type === 'host_unreachable' || rule.type === 'host_metric_threshold') {
+    return (
+      hosts.value.find((host) => host.id === rule.host_id)?.display_name ?? 'Host no disponible'
+    )
+  }
+  if (rule.type === 'check_failed') {
+    return (
+      checks.value.find((check) => check.id === rule.check_id)?.name ?? 'Servicio no disponible'
+    )
+  }
+  const filesystem = filesystems.value.find(
+    ({ filesystem }) => filesystem.id === rule.filesystem_id,
+  )
+  return filesystem
+    ? filesystem.hostName + ' · ' + filesystem.filesystem.mount_point
+    : 'Almacenamiento no disponible'
 }
 
 onMounted(() => {
@@ -228,14 +278,14 @@ onMounted(() => {
   <main id="main-content" class="alerts route-view" tabindex="-1">
     <section class="alerts__hero">
       <PageIntro
-        index="05"
-        eyebrow="Alertas / señal derivada"
-        title="Actúa cuando la señal cruza la línea."
-        copy="Las reglas nacen de resultados programados, conservan continuidad explícita y abren incidentes que se entregan a los canales configurados. Los datos ausentes nunca se convierten silenciosamente en ceros."
+        eyebrow="Alertas"
+        title="Actúa cuando algo necesita atención."
+        copy="Define condiciones para tus hosts, servicios y almacenamiento. Atalaya abre un incidente cuando la evidencia sostiene el problema y lo entrega a los canales que elijas."
       />
       <aside class="alerts__hero-rail">
-        <span>Abiertos</span><strong>{{ incidents.length }} incidentes</strong
-        ><span>Evaluación</span><strong>Después de cada muestra</strong>
+        <span>{{ incidentView === 'open' ? 'Abiertos' : 'Resueltos' }}</span
+        ><strong>{{ incidents.length }} incidentes</strong><span>Evaluación</span
+        ><strong>Después de cada muestra</strong>
       </aside>
     </section>
 
@@ -244,16 +294,34 @@ onMounted(() => {
     <section class="alerts__section" aria-labelledby="rules-title">
       <header class="alerts__heading">
         <div>
-          <p class="alerts__eyebrow">01 / Reglas</p>
-          <h2 id="rules-title">Condiciones sostenidas</h2>
+          <p class="alerts__eyebrow">Reglas de atención</p>
+          <h2 id="rules-title">Condiciones sostenidas.</h2>
         </div>
-        <button
-          class="primary-button"
-          type="button"
-          @click="showForm ? resetForm() : startCreate()"
-        >
-          {{ showForm ? 'Cerrar formulario' : 'Nueva regla' }}
-        </button>
+        <div class="alerts__heading-actions">
+          <div class="alerts__filters" role="group" aria-label="Filtro de reglas">
+            <button
+              type="button"
+              :class="{ 'is-active': !showArchived }"
+              @click="showArchived = false"
+            >
+              Activas
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-active': showArchived }"
+              @click="showArchived = true"
+            >
+              Archivadas
+            </button>
+          </div>
+          <button
+            class="primary-button"
+            type="button"
+            @click="showForm ? resetForm() : startCreate()"
+          >
+            {{ showForm ? 'Cerrar formulario' : 'Nueva regla' }}
+          </button>
+        </div>
       </header>
 
       <form v-if="showForm" class="alert-form" @submit.prevent="save">
@@ -264,19 +332,19 @@ onMounted(() => {
         <label
           >Tipo<select v-model="form.type" @change="form.targetID = ''">
             <option value="host_unreachable">Host inalcanzable</option>
-            <option value="check_failed">Check fallido</option>
-            <option value="host_metric_threshold">Umbral de host</option>
-            <option value="filesystem_threshold">Umbral de filesystem</option>
+            <option value="check_failed">Servicio con errores</option>
+            <option value="host_metric_threshold">Uso de CPU o memoria</option>
+            <option value="filesystem_threshold">Uso de almacenamiento</option>
           </select></label
         >
         <label
           >Severidad<select v-model="form.severity">
-            <option value="warning">Warning</option>
-            <option value="critical">Critical</option>
+            <option value="warning">Advertencia</option>
+            <option value="critical">Crítica</option>
           </select></label
         >
         <label class="alert-form__wide"
-          >Target
+          >Recurso
           <select v-model="form.targetID" required>
             <option value="" disabled>Selecciona un recurso</option>
             <option v-for="target in targetOptions" :key="target.id" :value="target.id">
@@ -292,7 +360,7 @@ onMounted(() => {
           >Canales de notificación
           <select v-model="form.channelIDs" multiple required size="4">
             <option v-for="channel in channels" :key="channel.id" :value="channel.id">
-              {{ channel.name }} · {{ channel.provider }}
+              {{ channel.name }}
             </option>
           </select>
           <small v-if="channels.length === 0">Configura primero un canal de notificación.</small>
@@ -366,13 +434,13 @@ onMounted(() => {
           <header class="alert-card__header">
             <div>
               <p class="alerts__eyebrow">
-                {{ rule.type }} / {{ rule.severity }} / v{{ rule.version }}
+                {{ alertRuleTypeLabel(rule.type) }} · {{ severityLabel(rule.severity) }}
               </p>
               <h3>{{ rule.name }}</h3>
               <code>{{ condition(rule) }}</code>
             </div>
-            <span class="alert-state" :class="`alert-state--${evaluationTone(rule)}`">
-              {{ evaluationLabel(rule) }}
+            <span class="alert-state" :data-tone="alertStateTone(rule)">
+              {{ alertStateLabel(rule) }}
             </span>
           </header>
           <footer class="alert-card__actions">
@@ -412,7 +480,7 @@ onMounted(() => {
               v-if="!rule.archived"
               type="button"
               :disabled="busy === rule.id"
-              @click="updateState(rule, 'archive')"
+              @click="requestArchive(rule)"
             >
               Archivar
             </button>
@@ -424,23 +492,61 @@ onMounted(() => {
     <section class="alerts__section alerts__section--incidents" aria-labelledby="incidents-title">
       <header class="alerts__heading">
         <div>
-          <p class="alerts__eyebrow">02 / Incidentes abiertos</p>
-          <h2 id="incidents-title">Lo que pide atención ahora.</h2>
+          <p class="alerts__eyebrow">Historial de incidentes</p>
+          <h2 id="incidents-title">Lo que necesita atención.</h2>
         </div>
-        <RouterLink class="alerts__link" to="/notifications">Ver entregas</RouterLink>
+        <div class="alerts__heading-actions">
+          <div class="alerts__filters" role="group" aria-label="Filtro de incidentes">
+            <button
+              type="button"
+              :class="{ 'is-active': incidentView === 'open' }"
+              @click="incidentView = 'open'"
+            >
+              Abiertos
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-active': incidentView === 'resolved' }"
+              @click="incidentView = 'resolved'"
+            >
+              Resueltos
+            </button>
+          </div>
+          <RouterLink class="alerts__link" to="/notifications">Ver entregas</RouterLink>
+        </div>
       </header>
-      <p v-if="incidents.length === 0" class="alerts__empty">No hay incidentes abiertos.</p>
+      <p v-if="incidents.length === 0" class="alerts__empty">
+        {{
+          incidentView === 'open' ? 'No hay incidentes abiertos.' : 'No hay incidentes resueltos.'
+        }}
+      </p>
       <div v-else class="incident-list">
         <article v-for="incident in incidents" :key="incident.id" class="incident-card">
           <div>
-            <p class="alerts__eyebrow">{{ incident.severity }} / {{ incident.condition_status }}</p>
+            <p class="alerts__eyebrow">
+              {{ severityLabel(incident.severity) }} ·
+              {{ incidentView === 'open' ? 'Abierto' : 'Resuelto' }}
+            </p>
             <h3>{{ incident.rule_name }}</h3>
-            <p>{{ incident.target_name }} · iniciado {{ formatDate(incident.fired_at) }}</p>
+            <p>
+              {{ incident.target_name }} · {{ incidentView === 'open' ? 'iniciado' : 'resuelto' }}
+              {{ formatDateTime(incident.resolved_at ?? incident.fired_at) }}
+            </p>
           </div>
-          <span>{{ incident.rule_type }}</span>
+          <span>{{ alertRuleTypeLabel(incident.rule_type) }}</span>
         </article>
       </div>
     </section>
+
+    <ConfirmDialog
+      :open="archiveTarget !== null"
+      title="¿Archivar esta regla?"
+      copy="Dejará de evaluar nuevas muestras, pero podrás restaurarla desde las reglas archivadas."
+      confirm-label="Archivar regla"
+      danger
+      @confirm="confirmArchive"
+      @cancel="archiveTarget = null"
+    />
   </main>
 </template>
 
@@ -451,7 +557,7 @@ onMounted(() => {
   border-inline: 1px solid var(--line-soft);
 }
 .alerts__hero {
-  min-height: min(35rem, calc(100svh - 8rem));
+  min-height: min(28rem, calc(100svh - 8rem));
   display: grid;
   align-items: center;
   gap: 2rem;
@@ -480,6 +586,31 @@ onMounted(() => {
   align-items: end;
   gap: 2rem;
   margin-bottom: 2rem;
+}
+.alerts__heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  align-items: center;
+  gap: 0.75rem;
+}
+.alerts__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.alerts__filters button {
+  border: 1px solid var(--line-strong);
+  padding: 0.5rem 0.7rem;
+  background: transparent;
+  color: var(--ink);
+  font: 800 0.62rem var(--font-mono);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.alerts__filters button.is-active {
+  background: var(--ink);
+  color: var(--paper);
 }
 .alerts__heading h2 {
   max-width: 12ch;
@@ -589,20 +720,19 @@ onMounted(() => {
   font: 800 0.62rem var(--font-mono);
   text-transform: uppercase;
 }
-.alert-state--active {
+.alert-state[data-tone='success'] {
   color: var(--signal);
 }
-.alert-state--paused {
-  color: var(--accent-text);
-}
-.alert-state--pending {
+.alert-state[data-tone='warning'] {
   border-color: #8a5a00;
   color: #8a5a00;
 }
-.alert-state--firing {
+.alert-state[data-tone='danger'] {
   border-color: var(--signal);
-  background: var(--ink);
-  color: var(--paper);
+  color: var(--accent-text);
+}
+.alert-state[data-tone='neutral'] {
+  color: var(--ink-muted);
 }
 .alert-card__actions {
   display: flex;
@@ -640,6 +770,10 @@ onMounted(() => {
   .alert-card__header,
   .incident-card {
     display: block;
+  }
+  .alerts__heading-actions {
+    justify-content: start;
+    margin-top: 1rem;
   }
   .alert-state {
     display: inline-block;

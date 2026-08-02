@@ -1,7 +1,6 @@
 <script setup lang="ts">
 withDefaults(
   defineProps<{
-    index: string
     eyebrow: string
     title: string
     copy?: string
@@ -16,7 +15,6 @@ withDefaults(
 
 <template>
   <header class="page-intro" :class="{ 'page-intro--compact': compact }">
-    <p class="page-intro__index" aria-hidden="true">{{ index }}</p>
     <div class="page-intro__body">
       <p class="page-intro__eyebrow">{{ eyebrow }}</p>
       <h1 class="page-intro__title">{{ title }}</h1>
@@ -27,18 +25,7 @@ withDefaults(
 
 <style scoped>
 .page-intro {
-  display: grid;
-  grid-template-columns: minmax(6rem, 0.35fr) minmax(0, 2fr);
-  align-items: start;
-}
-
-.page-intro__index {
-  margin: 0;
-  color: var(--accent-surface);
-  font: 900 clamp(4rem, 8vw, 8.5rem) / 0.72 var(--font-mono);
-  letter-spacing: -0.12em;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
+  display: block;
 }
 
 .page-intro__body {
@@ -58,6 +45,7 @@ withDefaults(
   margin: 0;
   font: 600 clamp(3.5rem, 7vw, 7.5rem) / 0.84 var(--font-display);
   letter-spacing: -0.06em;
+  overflow-wrap: anywhere;
 }
 
 .page-intro__copy {
@@ -70,26 +58,14 @@ withDefaults(
   line-height: 1.75;
 }
 
-.page-intro--compact .page-intro__index {
-  font-size: clamp(3.5rem, 7vw, 6.5rem);
-}
-
 .page-intro--compact .page-intro__title {
   font-size: clamp(3rem, 6vw, 5.7rem);
 }
 
 @media (max-width: 42rem) {
-  .page-intro {
-    grid-template-columns: 1fr;
-  }
-
-  .page-intro__index {
-    display: none;
-  }
-
   .page-intro__title,
   .page-intro--compact .page-intro__title {
-    font-size: clamp(3.1rem, 15vw, 5.25rem);
+    font-size: clamp(2.8rem, 13vw, 4.8rem);
   }
 
   .page-intro__copy {

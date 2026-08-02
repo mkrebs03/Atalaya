@@ -21,6 +21,11 @@ async function submitPasswordChange(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Cambiar contraseña' }).click()
 }
 
+async function openAdministration(page: import('@playwright/test').Page, item: string) {
+  await page.getByRole('button', { name: /Administración/ }).click()
+  await page.getByRole('link', { name: item, exact: true }).click()
+}
+
 async function mockAuthenticatedLogin(page: import('@playwright/test').Page) {
   await page.route('**/api/v1/hosts?*', async (route) => {
     await route.fulfill({
@@ -66,11 +71,11 @@ test('protects direct routes and validates credentials', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('incorrectos')
   await submitLoginForm(page)
   await expect(page).toHaveURL('/')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('La torre recibe señal.')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Estado de la infraestructura.')
   await expect(page.getByRole('heading', { name: 'local-agent' })).toBeVisible()
   await expect(page.getByText('12,5 %').first()).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('La torre recibe señal.')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Estado de la infraestructura.')
 })
 
 test('changes password, revokes another session, and logs out', async ({ browser, page }) => {
@@ -79,7 +84,7 @@ test('changes password, revokes another session, and logs out', async ({ browser
   await login(page)
   await login(secondPage)
 
-  await page.getByRole('link', { name: 'Cuenta' }).click()
+  await openAdministration(page, 'Cuenta')
   await page.getByLabel('Contraseña actual').fill('wrong current password')
   await page.getByLabel('Nueva contraseña', { exact: true }).fill('unused horse battery staple!')
   await page.getByLabel('Confirmar nueva contraseña').fill('unused horse battery staple!')
@@ -118,11 +123,11 @@ test('authenticated shell remains usable at narrow width', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'local-agent' })).toBeVisible()
   await expect(page.getByText('12,5 %').first()).toBeVisible()
   await expect(page.getByText('Direcciones · 100.64.0.10')).toBeVisible()
-  await expect(page.getByRole('row', { name: /\/.*ext4.*Presente.*25 %.*96 GiB/ })).toBeVisible()
+  await expect(page.getByText('/dev/sda1 · ext4', { exact: true })).toBeVisible()
   await expect
     .poll(() => page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
     .toBe(true)
-  await page.getByRole('link', { name: 'Cuenta' }).click()
+  await openAdministration(page, 'Cuenta')
   await expect(page.getByRole('heading', { name: 'Cambiar contraseña' })).toBeVisible()
   await expect.poll(() => page.evaluate('window.scrollY')).toBe(0)
   await expect.poll(() => page.evaluate('document.activeElement?.id')).toBe('main-content')
@@ -141,7 +146,7 @@ test('handles an API 401 during an active SPA operation', async ({ page }) => {
     })
   })
   await login(page)
-  await page.getByRole('link', { name: 'Cuenta' }).click()
+  await openAdministration(page, 'Cuenta')
   await page.route('**/api/v1/auth/change-password', async (route) => {
     await route.fulfill({
       status: 401,
@@ -174,7 +179,7 @@ test('redirects when host polling discovers an expired session', async ({ page }
 test('shows authenticated system status without secrets', async ({ page }) => {
   await login(page)
   const statusResponse = page.waitForResponse('**/api/v1/system/status')
-  await page.getByRole('link', { name: 'Sistema' }).click()
+  await openAdministration(page, 'Sistema')
   const response = await statusResponse
   expect(response.status()).toBe(200)
   const payload = await response.json()
@@ -218,13 +223,13 @@ test('handles csrf_failed in SPA and fetches a fresh CSRF token', async ({ page 
 
   await mockAuthenticatedLogin(page)
   await login(page)
-  await page.getByRole('link', { name: 'Cuenta' }).click()
+  await openAdministration(page, 'Cuenta')
   await submitPasswordChange(page)
   await expect(page).toHaveURL(/\/login$/)
   await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible()
 
   await submitLoginForm(page)
-  await page.getByRole('link', { name: 'Cuenta' }).click()
+  await openAdministration(page, 'Cuenta')
   await submitPasswordChange(page)
   await expect(page.getByRole('alert')).toContainText('actual no es correcta')
   expect(csrfRequests).toBe(2)

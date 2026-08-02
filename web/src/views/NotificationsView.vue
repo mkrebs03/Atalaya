@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import PageIntro from '@/components/ui/PageIntro.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useAuth } from '@/auth/useAuth'
 import { useHostPolling } from '@/composables/useHostPolling'
 import {
@@ -12,9 +13,18 @@ import {
   testNotificationChannel,
   type NotificationChannel,
 } from '@/notifications/api'
+import {
+  deliveryKindLabel,
+  deliveryStateLabel,
+  deliveryStateTone,
+  formatDateTime,
+  transitionLabel,
+} from '@/ui/labels'
 
 const auth = useAuth()
 const showCreate = ref(false)
+const showArchived = ref(false)
+const archiveTarget = ref<NotificationChannel | null>(null)
 const busy = ref('')
 const error = ref('')
 const form = reactive({ name: '', webhookURL: '' })
@@ -29,8 +39,19 @@ const polling = useHostPolling(async (signal) => {
   return { channels: channelsResponse.data.items, deliveries: deliveriesResponse.data.items }
 })
 
-const channels = computed(() => polling.data.value?.channels ?? [])
+const channels = computed(() => {
+  const allChannels = polling.data.value?.channels ?? []
+  return showArchived.value
+    ? allChannels.filter((channel) => channel.archived)
+    : allChannels.filter((channel) => !channel.archived)
+})
 const deliveries = computed(() => polling.data.value?.deliveries ?? [])
+
+function channelName(id: string) {
+  return (
+    polling.data.value?.channels.find((channel) => channel.id === id)?.name ?? 'Canal no disponible'
+  )
+}
 
 function resetForm() {
   form.name = ''
@@ -76,6 +97,16 @@ async function updateChannel(
   }
 }
 
+function requestArchive(channel: NotificationChannel) {
+  archiveTarget.value = channel
+}
+
+function confirmArchive() {
+  const channel = archiveTarget.value
+  archiveTarget.value = null
+  if (channel) void updateChannel(channel, 'archive')
+}
+
 async function sendTest(channel: NotificationChannel) {
   busy.value = `test:${channel.id}`
   error.value = ''
@@ -91,10 +122,6 @@ async function sendTest(channel: NotificationChannel) {
   }
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString('es-CL')
-}
-
 onMounted(() => polling.refresh())
 </script>
 
@@ -102,10 +129,9 @@ onMounted(() => polling.refresh())
   <main id="main-content" class="notifications route-view" tabindex="-1">
     <section class="notifications__hero">
       <PageIntro
-        index="05"
-        eyebrow="Notificaciones / outbox seguro"
-        title="Entrega la decisión, no el secreto."
-        copy="Discord recibe payloads inmutables desde una cola persistente. El webhook solo se escribe; la UI muestra configuración pública, estados y auditoría de entregas."
+        eyebrow="Notificaciones"
+        title="Lleva las alertas a tu equipo."
+        copy="Configura los canales que recibirán los incidentes. Los secretos se guardan de forma segura y en la interfaz solo verás su estado y el historial de entregas."
       />
     </section>
 
@@ -114,12 +140,30 @@ onMounted(() => polling.refresh())
     <section class="notifications__section" aria-labelledby="channels-title">
       <header class="notifications__heading">
         <div>
-          <p class="notifications__eyebrow">01 / Canales</p>
-          <h2 id="channels-title">Destinos que puedes revocar.</h2>
+          <p class="notifications__eyebrow">Canales configurados</p>
+          <h2 id="channels-title">Destinos de alerta.</h2>
         </div>
-        <button class="primary-button" type="button" @click="showCreate = !showCreate">
-          {{ showCreate ? 'Cerrar formulario' : 'Nuevo Discord' }}
-        </button>
+        <div class="notifications__heading-actions">
+          <div class="notifications__filters" role="group" aria-label="Filtro de canales">
+            <button
+              type="button"
+              :class="{ 'is-active': !showArchived }"
+              @click="showArchived = false"
+            >
+              Activos
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-active': showArchived }"
+              @click="showArchived = true"
+            >
+              Archivados
+            </button>
+          </div>
+          <button class="primary-button" type="button" @click="showCreate = !showCreate">
+            {{ showCreate ? 'Cerrar formulario' : 'Agregar canal' }}
+          </button>
+        </div>
       </header>
       <form v-if="showCreate" class="channel-form" @submit.prevent="save">
         <label>Nombre<input v-model.trim="form.name" maxlength="128" required /></label>
@@ -145,7 +189,9 @@ onMounted(() => polling.refresh())
         No pudimos consultar las notificaciones.
         <button type="button" @click="polling.refresh">Reintentar</button>
       </p>
-      <p v-else-if="channels.length === 0" class="notifications__empty">Todavía no hay canales.</p>
+      <p v-else-if="channels.length === 0" class="notifications__empty">
+        {{ showArchived ? 'No hay canales archivados.' : 'No hay canales activos.' }}
+      </p>
       <div v-else class="channel-list">
         <article
           v-for="channel in channels"
@@ -155,7 +201,10 @@ onMounted(() => polling.refresh())
         >
           <header>
             <div>
-              <p class="notifications__eyebrow">{{ channel.provider }} / v{{ channel.version }}</p>
+              <p class="notifications__eyebrow">
+                Discord ·
+                {{ channel.archived ? 'Archivado' : channel.enabled ? 'Activo' : 'Pausado' }}
+              </p>
               <h3>{{ channel.name }}</h3>
               <code>{{
                 channel.secret_configured
@@ -163,9 +212,6 @@ onMounted(() => polling.refresh())
                   : 'Webhook ausente'
               }}</code>
             </div>
-            <span>{{
-              channel.archived ? 'Archivado' : channel.enabled ? 'Activo' : 'Pausado'
-            }}</span>
           </header>
           <footer class="channel-card__actions">
             <button
@@ -194,7 +240,7 @@ onMounted(() => polling.refresh())
               <button
                 type="button"
                 :disabled="busy === channel.id"
-                @click="updateChannel(channel, 'archive')"
+                @click="requestArchive(channel)"
               >
                 Archivar
               </button>
@@ -207,7 +253,7 @@ onMounted(() => polling.refresh())
     <section class="notifications__section" aria-labelledby="deliveries-title">
       <header class="notifications__heading">
         <div>
-          <p class="notifications__eyebrow">02 / Entregas</p>
+          <p class="notifications__eyebrow">Historial de entregas</p>
           <h2 id="deliveries-title">Cada intento deja rastro.</h2>
         </div>
         <span>{{ deliveries.length }} recientes</span>
@@ -216,17 +262,31 @@ onMounted(() => polling.refresh())
       <div v-else class="delivery-list">
         <article v-for="delivery in deliveries" :key="delivery.id" class="delivery-card">
           <div>
-            <p class="notifications__eyebrow">{{ delivery.kind }} / {{ delivery.channel_id }}</p>
-            <h3>{{ delivery.transition || 'Prueba de canal' }}</h3>
+            <p class="notifications__eyebrow">
+              {{ deliveryKindLabel(delivery.kind) }} · {{ channelName(delivery.channel_id) }}
+            </p>
+            <h3>{{ transitionLabel(delivery.transition) }}</h3>
             <p>
-              {{ delivery.state }} · {{ delivery.attempts }} intentos ·
-              {{ formatDate(delivery.created_at) }}
+              {{ deliveryStateLabel(delivery.state) }} · {{ delivery.attempts }} intentos ·
+              {{ formatDateTime(delivery.created_at) }}
             </p>
           </div>
-          <span :class="`delivery-state--${delivery.state}`">{{ delivery.state }}</span>
+          <span class="delivery-state" :data-tone="deliveryStateTone(delivery.state)">{{
+            deliveryStateLabel(delivery.state)
+          }}</span>
         </article>
       </div>
     </section>
+
+    <ConfirmDialog
+      :open="archiveTarget !== null"
+      title="¿Archivar este canal?"
+      copy="Dejará de recibir nuevas alertas, pero podrás restaurarlo después."
+      confirm-label="Archivar canal"
+      danger
+      @confirm="confirmArchive"
+      @cancel="archiveTarget = null"
+    />
   </main>
 </template>
 
@@ -237,7 +297,7 @@ onMounted(() => polling.refresh())
   border-inline: 1px solid var(--line-soft);
 }
 .notifications__hero {
-  min-height: min(35rem, calc(100svh - 8rem));
+  min-height: min(28rem, calc(100svh - 8rem));
   display: grid;
   align-items: center;
   border-bottom: 1px solid var(--line-strong);
@@ -264,6 +324,31 @@ onMounted(() => polling.refresh())
   color: var(--ink-muted);
   font: 800 0.62rem var(--font-mono);
   text-transform: uppercase;
+}
+.notifications__heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  align-items: center;
+  gap: 0.75rem;
+}
+.notifications__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.notifications__filters button {
+  border: 1px solid var(--line-strong);
+  padding: 0.5rem 0.7rem;
+  background: transparent;
+  color: var(--ink);
+  font: 800 0.62rem var(--font-mono);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.notifications__filters button.is-active {
+  background: var(--ink);
+  color: var(--paper);
 }
 .notifications__eyebrow {
   margin: 0 0 0.65rem;
@@ -362,11 +447,14 @@ onMounted(() => polling.refresh())
   margin: 0;
   color: var(--ink-muted);
 }
-.delivery-state--delivered {
+.delivery-state[data-tone='success'] {
   color: var(--signal) !important;
 }
-.delivery-state--failed {
+.delivery-state[data-tone='danger'] {
   color: var(--accent-text) !important;
+}
+.delivery-state[data-tone='warning'] {
+  color: #8a5a00 !important;
 }
 @media (max-width: 52rem) {
   .channel-form {
@@ -379,6 +467,10 @@ onMounted(() => polling.refresh())
   .channel-card header,
   .delivery-card {
     display: block;
+  }
+  .notifications__heading-actions {
+    justify-content: start;
+    margin-top: 1rem;
   }
   .channel-card header > span,
   .delivery-card > span {

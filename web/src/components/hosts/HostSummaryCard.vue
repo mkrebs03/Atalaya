@@ -2,21 +2,11 @@
 import { computed, type DeepReadonly } from 'vue'
 import type { HostSummary } from '@/hosts/api'
 import { formatBytes, formatDate, formatPercent } from '@/hosts/format'
+import { hostStateLabel, hostStateTone } from '@/ui/labels'
 
 const props = defineProps<{ host: DeepReadonly<HostSummary> }>()
-const stateLabel = computed(() => {
-  if (props.host.observed_state === 'unreachable') return 'Sin alcance'
-  if (props.host.stale) return 'Señal vencida'
-  return { healthy: 'Saludable', degraded: 'Degradado', unknown: 'Esperando señal' }[
-    props.host.observed_state
-  ]
-})
-const tone = computed(() => {
-  if (props.host.observed_state === 'unreachable') return 'danger'
-  if (props.host.stale || props.host.observed_state === 'degraded') return 'warning'
-  if (props.host.observed_state === 'healthy') return 'success'
-  return 'neutral'
-})
+const stateLabel = computed(() => hostStateLabel(props.host.observed_state, props.host.stale))
+const tone = computed(() => hostStateTone(props.host.observed_state, props.host.stale))
 const accessibleLabel = computed(
   () => `Abrir ${props.host.display_name}. Estado: ${stateLabel.value}`,
 )
@@ -30,7 +20,7 @@ const accessibleLabel = computed(
   >
     <article>
       <header class="host-card__header">
-        <p class="host-card__index">HOST / {{ host.id.slice(0, 8) }}</p>
+        <p class="host-card__index">Host</p>
         <span class="host-card__state" :data-tone="tone">{{ stateLabel }}</span>
       </header>
       <h3 class="host-card__title">{{ host.display_name }}</h3>
@@ -45,7 +35,7 @@ const accessibleLabel = computed(
           <dd>{{ formatBytes(host.memory_used_bytes) }}</dd>
         </div>
         <div>
-          <dt>Disco crítico</dt>
+          <dt>Almacenamiento más usado</dt>
           <dd>{{ formatPercent(host.most_constrained_filesystem?.used_percent ?? null) }}</dd>
         </div>
       </dl>
@@ -54,7 +44,7 @@ const accessibleLabel = computed(
           host.warnings.length === 1 ? '' : 's'
         }}
       </p>
-      <span class="host-card__link">Abrir estado actual →</span>
+      <span class="host-card__link">Ver detalle →</span>
     </article>
   </RouterLink>
 </template>
@@ -76,7 +66,7 @@ const accessibleLabel = computed(
   background: #fffdf5;
 }
 .host-card article {
-  min-height: 25rem;
+  min-height: 21rem;
   display: flex;
   flex-direction: column;
   padding: clamp(1.25rem, 3vw, 2rem);
@@ -127,7 +117,7 @@ const accessibleLabel = computed(
   color: var(--ink-muted);
 }
 .host-card__title {
-  margin: 3rem 0 0.75rem;
+  margin: 2.25rem 0 0.75rem;
   font: 500 clamp(2.25rem, 4vw, 4rem)/0.92 var(--font-display);
   letter-spacing: -0.045em;
   overflow-wrap: anywhere;

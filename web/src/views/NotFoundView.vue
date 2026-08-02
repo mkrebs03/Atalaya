@@ -9,9 +9,9 @@ import { RouterLink } from 'vue-router'
       <p class="not-found__eyebrow">Coordenada fuera de alcance</p>
       <h1 class="not-found__title">Esta ruta no está en el mapa.</h1>
       <p class="not-found__copy">
-        La dirección solicitada no corresponde a una vista disponible en este puesto de observación.
+        La dirección solicitada no corresponde a una vista disponible en Atalaya.
       </p>
-      <RouterLink class="not-found__link" to="/">Volver al puesto de observación</RouterLink>
+      <RouterLink class="not-found__link" to="/">Volver al resumen</RouterLink>
     </div>
   </main>
 </template>

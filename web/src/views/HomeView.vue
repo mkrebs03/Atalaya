@@ -11,15 +11,14 @@ const polling = useHostPolling<HostSummary[]>(async (signal) => {
 
 <template>
   <main id="main-content" class="home route-view" tabindex="-1">
-    <section class="home__hero" aria-labelledby="home-title">
+    <section class="home__hero">
       <PageIntro
-        index="02"
-        eyebrow="Estado actual"
-        title="La torre recibe señal."
-        copy="Lecturas privadas de CPU, memoria, almacenamiento y conectividad. Una vista operativa sin convertir la ausencia de datos en un falso cero."
+        eyebrow="Resumen"
+        title="Estado de la infraestructura."
+        copy="Consulta el estado actual de tus hosts. Los datos ausentes se muestran como desconocidos y los datos vencidos como desactualizados."
       />
-      <aside class="home__rail" aria-label="Cadencia de actualización">
-        <span>Actualización</span><strong>30 segundos</strong><span>Alcance</span
+      <aside class="home__meta" aria-label="Información de actualización">
+        <span>Actualización automática</span><strong>Cada 30 segundos</strong> <span>Red</span
         ><strong>Tailnet privada</strong>
       </aside>
     </section>
@@ -40,34 +39,31 @@ const polling = useHostPolling<HostSummary[]>(async (signal) => {
   border-inline: 1px solid var(--line-soft);
 }
 .home__hero {
-  min-height: min(38rem, calc(100svh - 8rem));
+  min-height: min(28rem, calc(100svh - 8rem));
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.16fr);
+  grid-template-columns: minmax(0, 1fr) minmax(13rem, 0.28fr);
   align-items: center;
   border-bottom: 1px solid var(--line-strong);
 }
 .home__hero :deep(.page-intro) {
   padding: clamp(4rem, 9vw, 8rem) var(--page-gutter);
 }
-.home__rail {
+.home__meta {
   align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  display: grid;
+  align-content: end;
   gap: 0.25rem;
   border-left: 1px solid var(--line-soft);
   padding: 2rem 1.25rem;
   font-family: var(--font-mono);
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
 }
-.home__rail span {
+.home__meta span {
   color: var(--ink-muted);
   font-size: 0.58rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-.home__rail strong {
+.home__meta strong {
   font-size: 0.7rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -76,17 +72,26 @@ const polling = useHostPolling<HostSummary[]>(async (signal) => {
   .home__hero {
     grid-template-columns: 1fr;
   }
-  .home__rail {
-    display: none;
+  .home__meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.8rem;
+    border-top: 1px solid var(--line-soft);
+    border-left: 0;
+    padding: 1rem var(--page-gutter);
+  }
+  .home__meta span:nth-of-type(2) {
+    margin-left: 1rem;
   }
 }
 @media (max-width: 42rem) {
   .home__hero {
-    min-height: calc(100svh - 7.25rem);
-    align-items: end;
+    min-height: auto;
+    align-items: start;
   }
   .home__hero :deep(.page-intro) {
-    padding-block: 5rem 3.5rem;
+    padding-block: 3.5rem 3rem;
   }
 }
 </style>

@@ -2,6 +2,7 @@
 import type { HostDetail } from '@/hosts/api'
 import type { DeepReadonly } from 'vue'
 import { formatBytes, formatDuration, formatPercent } from '@/hosts/format'
+import { tailscaleStateLabel } from '@/ui/labels'
 
 defineProps<{ host: DeepReadonly<HostDetail> }>()
 </script>
@@ -9,7 +10,7 @@ defineProps<{ host: DeepReadonly<HostDetail> }>()
 <template>
   <section class="metrics" aria-labelledby="metrics-title">
     <header>
-      <p>Lectura inmediata</p>
+      <p>Métricas actuales</p>
       <h2 id="metrics-title">Estado actual</h2>
     </header>
     <dl class="metrics__grid">
@@ -25,13 +26,13 @@ defineProps<{ host: DeepReadonly<HostDetail> }>()
         >
       </div>
       <div>
-        <dt>Tiempo activo</dt>
+        <dt>Tiempo encendido</dt>
         <dd>{{ formatDuration(host.uptime_seconds) }}</dd>
       </div>
       <div>
         <dt>Tailscale</dt>
-        <dd>{{ host.tailscale?.state ?? 'Sin dato' }}</dd>
-        <small>Hostname · {{ host.tailscale?.hostname ?? 'Sin hostname' }}</small>
+        <dd>{{ tailscaleStateLabel(host.tailscale) }}</dd>
+        <small>Nombre · {{ host.tailscale?.hostname ?? 'Sin nombre' }}</small>
         <small class="metrics__addresses">
           <span>Direcciones · </span
           >{{

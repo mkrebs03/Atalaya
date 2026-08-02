@@ -124,12 +124,12 @@ onUnmounted(() => {
   <article class="historical-chart">
     <header class="historical-chart__header">
       <div>
-        <p>Serie temporal</p>
+        <p>Histórico</p>
         <h3>{{ title }}</h3>
       </div>
       <div class="historical-chart__labels">
-        <span v-if="hasGaps" class="historical-chart__gap-label">Hay huecos</span>
-        <span v-if="hasIncomplete" class="historical-chart__partial-label">Rollups parciales</span>
+        <span v-if="hasGaps" class="historical-chart__gap-label">Periodos sin datos</span>
+        <span v-if="hasIncomplete" class="historical-chart__partial-label">Cobertura parcial</span>
       </div>
     </header>
     <p v-if="points.length === 0" class="historical-chart__empty">Sin muestras en este rango.</p>
@@ -138,13 +138,14 @@ onUnmounted(() => {
       class="historical-chart__plot"
       :class="{ 'historical-chart__plot--empty': points.length === 0 }"
       :aria-label="title"
+      role="img"
       v-show="points.length > 0"
     />
     <p v-if="hasGaps" class="historical-chart__hint">
-      Los tramos sin recepción se mantienen como huecos.
+      Los periodos sin recepción se mantienen como huecos.
     </p>
     <p v-if="hasIncomplete" class="historical-chart__hint">
-      Algunas horas tienen cobertura parcial y se muestran sin ocultar su medición.
+      Algunas mediciones cubren sólo parte del periodo y se muestran sin ocultarlas.
     </p>
   </article>
 </template>

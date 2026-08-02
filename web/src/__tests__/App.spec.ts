@@ -44,16 +44,18 @@ describe('authenticated application routes', () => {
     const { router, wrapper } = await mountAt('/account')
     expect(router.currentRoute.value.name).toBe('login')
     expect(router.currentRoute.value.query.redirect).toBe('/account')
-    expect(wrapper.get('h1').text()).toBe('La torre está cerrada por dentro.')
+    expect(wrapper.get('h1').text()).toBe('Observa tu infraestructura.')
   })
 
   it('renders the protected shell for an authenticated administrator', async () => {
     const { wrapper } = await mountAt('/', true)
-    expect(wrapper.get('h1').text()).toBe('La torre recibe señal.')
+    expect(wrapper.get('h1').text()).toBe('Estado de la infraestructura.')
     expect(wrapper.text()).toContain('admin')
     expect(wrapper.get('.skip-link').attributes('href')).toBe('#main-content')
     expect(wrapper.get('[aria-label="Principal"]').text()).toContain('Resumen')
-    expect(wrapper.get('[aria-label="Principal"]').text()).toContain('Cuenta')
+    expect(wrapper.get('[aria-label="Principal"]').text()).toContain('Alertas')
+    await wrapper.get('.masthead__administration-toggle').trigger('click')
+    expect(wrapper.text()).toContain('Cuenta')
   })
 
   it('rejects an external-looking login redirect', async () => {
