@@ -89,6 +89,11 @@ case "$command" in
 esac
 EOF
 chmod 0755 "$FAKE_BINARY"
+# The initial install intentionally uses the system `true` binary to verify that
+# --no-start does not invoke application commands. Before exercising upgrade,
+# seed the installed path with a previous Atalaya-like binary that can create
+# the pre-migration backup expected from a real upgrade.
+cp "$FAKE_BINARY" "$TEST_ROOT/root/usr/local/bin/atalaya"
 cat > "$FAKE_SYSTEMCTL" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "$ATALAYA_SYSTEMCTL_LOG"
