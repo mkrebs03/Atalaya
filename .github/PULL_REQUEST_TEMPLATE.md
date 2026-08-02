@@ -12,6 +12,7 @@
 ## Seguridad y contrato
 
 - [ ] Revisé `spec.md` y la documentación técnica relevante.
+- [ ] Revisé los resultados de CodeQL cuando aplica.
 - [ ] No incluí secretos, credenciales, datos de producción ni artefactos generados.
 - [ ] Actualicé documentación y pruebas si cambia el contrato.
 - [ ] Consideré sesiones, CSRF, enrolamiento, credenciales, migraciones o SSRF si aplica.
