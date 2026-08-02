@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	DefaultDisplayName = "Oracle"
+	DefaultDisplayName = "local-agent"
 	DefaultListen      = "127.0.0.1:9474"
 	CredentialBytes    = 32
 )

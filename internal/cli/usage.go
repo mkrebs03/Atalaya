@@ -24,7 +24,7 @@ Commands:
 }
 
 func writeBootstrapUsage(output io.Writer) {
-	fmt.Fprint(output, "Usage: atalaya bootstrap <command> [options]\n\nCommands:\n  local-agent  Bootstrap the local Oracle agent\n")
+	fmt.Fprint(output, "Usage: atalaya bootstrap <command> [options]\n\nCommands:\n  local-agent  Bootstrap the local agent\n")
 }
 
 func writeBootstrapLocalAgentUsage(output io.Writer) {
@@ -36,7 +36,7 @@ Required:
   --agent-url <url>        Advertised https://<fqdn>.ts.net:9474 URL
 
 Options:
-  --display-name <name>    Host display name (default Oracle)
+  --display-name <name>    Host display name (default local-agent)
   --listen <addr>          Agent listener (default 127.0.0.1:9474)
   --credential-path <path> Credential file (default beside agent config)
 `)

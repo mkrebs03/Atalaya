@@ -345,7 +345,7 @@ fi
 if [ "$ROLE" = agent ] && [ ! -f "$AGENT_CONFIG" ]; then
   [ -n "$SERVER_URL" ] || die "--server-url or an existing agent.yaml is required for agent role"
   [ -n "$AGENT_URL" ] || AGENT_URL=https://$DNS_NAME:9474
-  [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME=$DNS_NAME
+  [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME=local-agent
   write_if_absent "$AGENT_CONFIG" 0640 "listen: 127.0.0.1:9474
 server_url: $SERVER_URL
 advertised_url: $AGENT_URL
@@ -554,7 +554,7 @@ fi
 if [ "$ROLE" = server ]; then
   "$INSTALL_BIN" migrate --config "$SERVER_CONFIG"
   [ -n "$AGENT_URL" ] || AGENT_URL=https://$DNS_NAME:9474
-  [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME=Oracle
+  [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME=local-agent
   "$INSTALL_BIN" bootstrap local-agent --server-config "$SERVER_CONFIG" --agent-config "$AGENT_CONFIG" --agent-url "$AGENT_URL" --credential-path "$AGENT_CREDENTIAL" --display-name "$DISPLAY_NAME"
   verify_output=
   verify_status=0
