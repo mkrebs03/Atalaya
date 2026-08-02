@@ -19,34 +19,25 @@ instala Tailscale automáticamente.
 
 ### Servidor
 
-En el host que alojará Atalaya, descarga la última release estable, inspecciona el
-script y ejecútalo:
+En el host que alojará Atalaya, ejecuta la última release estable desde una terminal:
 
 ```bash
-curl --fail --location --proto '=https' --proto-redir '=https' \
-  "https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh" \
-  --output install.sh
-sh -n install.sh
-sudo sh install.sh server
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh \
+  | sudo sh -s -- server
 ```
 
 El rol `server` instala también el agente local. Crea la base de datos, la clave
-maestra y el administrador inicial; la contraseña se solicita en la terminal y no
-aparece en la línea de comandos. Al terminar, abre la URL HTTPS del host dentro de
-la tailnet, normalmente `https://<servidor>.ts.net`.
+maestra y el administrador inicial; durante el proceso se te solicitará establecer
+la contraseña de forma segura. Al terminar, abre la URL HTTPS del host dentro de la
+tailnet, normalmente `https://<servidor>.ts.net`.
 
 ### Agente Linux remoto
 
-En cada host adicional, descarga y ejecuta el instalador indicando la URL HTTPS del
-servidor:
+En cada host adicional, ejecuta el instalador indicando la URL HTTPS del servidor:
 
 ```bash
-curl --fail --location --proto '=https' --proto-redir '=https' \
-  "https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh" \
-  --output install.sh
-sh -n install.sh
-sudo sh install.sh agent \
-  --server-url https://<servidor>.ts.net
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh \
+  | sudo sh -s -- agent --server-url https://<servidor>.ts.net
 ```
 
 Después, crea un token temporal en **Gestionar** en el servidor y enrola el agente:

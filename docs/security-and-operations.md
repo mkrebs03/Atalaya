@@ -277,7 +277,29 @@ fuera del host central, pero su automatización queda fuera de v1.
 
 ## 9. Instalacion y releases
 
-### Instalacion estable recomendada
+### Instalacion rapida
+
+Desde una terminal interactiva, el servidor puede instalarse sin guardar el script en
+el host:
+
+```bash
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh \
+  | sudo sh -s -- server
+```
+
+El instalador detecta la terminal de control aunque su `stdin` reciba el script por
+pipe, y usa esa terminal para solicitar la contraseña del administrador. Si no existe
+una terminal disponible, completa la instalación pero muestra el comando local para
+crear el administrador después.
+
+El mismo patrón sirve para un agente remoto:
+
+```bash
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh \
+  | sudo sh -s -- agent --server-url https://<servidor>.ts.net
+```
+
+### Instalacion auditable
 
 Requiere Linux con `systemd`, Tailscale instalado, autenticado y conectado, y
 `curl` o `wget`. El instalador no instala Tailscale ni abre un listener publico.

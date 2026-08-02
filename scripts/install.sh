@@ -590,6 +590,10 @@ if [ "$ROLE" = server ]; then
   if ! printf '%s\n' "$verify_output" | grep -q 'administrator=present'; then
     if [ -t 0 ]; then
       "$INSTALL_BIN" admin create --config "$SERVER_CONFIG"
+    elif ( : </dev/tty ) 2>/dev/null; then
+      # When install.sh is piped to `sh`, stdin contains the script. Use the
+      # controlling terminal for the administrator password prompt instead.
+      "$INSTALL_BIN" admin create --config "$SERVER_CONFIG" </dev/tty
     else
       printf '%s\n' "atalaya install: no administrator exists; run atalaya admin create before login" >&2
     fi

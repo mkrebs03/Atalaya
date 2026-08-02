@@ -82,7 +82,14 @@ case "$command" in
     tar -czf "$output" -C "$temporary" atalaya.db
     rm -rf "$temporary"
     ;;
-  migrate|tailscale|verify)
+  migrate|tailscale)
+    ;;
+  verify)
+    printf '%s\n' 'administrator=missing'
+    ;;
+  admin)
+    test -t 0
+    : > "$ATALAYA_ADMIN_MARKER"
     ;;
   *)
     ;;
@@ -106,6 +113,33 @@ EOF
 chmod 0755 "$FAKE_BIN_DIR/curl"
 cp "$FAKE_BINARY" "$ARTIFACT_ROOT/atalaya-linux-$ARCH"
 write_checksum
+
+if command -v script >/dev/null 2>&1; then
+  PIPE_ROOT="$TEST_ROOT/piped-root"
+  PIPE_MARKER="$TEST_ROOT/piped-admin-created"
+  PIPE_DRIVER="$TEST_ROOT/run-piped-install.sh"
+  cat > "$PIPE_DRIVER" <<EOF
+#!/bin/sh
+set -eu
+printf '%s\n' piped-input | env \\
+  ATALAYA_ROOT='$PIPE_ROOT' \\
+  ATALAYA_DNS_NAME=oracle.example.ts.net \\
+  ATALAYA_SKIP_SYSTEM_USER=1 \\
+  ATALAYA_SYSTEMCTL='$FAKE_SYSTEMCTL' \\
+  ATALAYA_SYSTEMCTL_LOG='$SYSTEMCTL_LOG' \\
+  ATALAYA_ADMIN_MARKER='$PIPE_MARKER' \\
+  sh '$SCRIPT_DIR/install.sh' server \\
+    --channel dev \\
+    --base-url 'file://$RELEASE_ROOT'
+EOF
+  chmod 0755 "$PIPE_DRIVER"
+  if script -q /dev/null "$PIPE_DRIVER" >/dev/null 2>&1; then
+    test -f "$PIPE_MARKER"
+  else
+    printf '%s\n' "piped server installation failed" >&2
+    exit 1
+  fi
+fi
 
 if ATALAYA_ROOT="$TEST_ROOT/root" \
   ATALAYA_DNS_NAME=oracle.example.ts.net \
