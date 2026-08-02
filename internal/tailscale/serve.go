@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os/exec"
 	"regexp"
@@ -155,7 +156,7 @@ func (adapter Adapter) Configure(ctx context.Context) (Result, error) {
 		if exact {
 			continue
 		}
-		if _, err := adapter.Command.Run(ctx, "serve", fmt.Sprintf("--https=%d", port), target); err != nil {
+		if _, err := adapter.Command.Run(ctx, "serve", "--bg", fmt.Sprintf("--https=%d", port), target); err != nil {
 			return Result{}, fmt.Errorf("configure tailscale Serve HTTPS %d for version %s; capability %s is unavailable", port, version, capability)
 		}
 	}
@@ -265,43 +266,68 @@ type serveRoute struct {
 }
 
 func parseRoutes(data []byte) ([]serveRoute, error) {
-	var value map[string]any
+	var value struct {
+		TCP map[string]struct {
+			HTTPS bool `json:"HTTPS"`
+			HTTP  bool `json:"HTTP"`
+		} `json:"TCP"`
+		Web map[string]struct {
+			Handlers map[string]struct {
+				Proxy string `json:"Proxy"`
+			} `json:"Handlers"`
+		} `json:"Web"`
+	}
 	if err := json.Unmarshal(data, &value); err != nil {
 		return nil, err
 	}
-	var routes []serveRoute
-	web, ok := value["Web"].(map[string]any)
-	if !ok {
-		return routes, nil
-	}
-	for address, raw := range web {
+	routes := make([]serveRoute, 0, len(value.Web))
+	for address, webServer := range value.Web {
 		parsedAddress, err := parseRouteAddress(address)
 		if err != nil {
 			return nil, err
 		}
-		entry, ok := raw.(map[string]any)
-		if !ok {
-			return nil, errors.New("invalid web route")
+		if parsedAddress.scheme == "" {
+			protocol, ok := value.TCP[strconv.Itoa(parsedAddress.port)]
+			if !ok {
+				return nil, errors.New("missing protocol for web route")
+			}
+			switch {
+			case protocol.HTTPS:
+				parsedAddress.scheme = "https"
+			case protocol.HTTP:
+				parsedAddress.scheme = "http"
+			default:
+				return nil, errors.New("unsupported protocol for web route")
+			}
 		}
-		handlers, ok := entry["Handlers"].(map[string]any)
-		if !ok {
+		if webServer.Handlers == nil {
 			return nil, errors.New("missing web handlers")
 		}
-		root, ok := handlers["/"].(map[string]any)
+		root, ok := webServer.Handlers["/"]
 		if !ok {
 			return nil, errors.New("missing root web handler")
 		}
-		proxy, ok := root["Proxy"].(string)
-		if !ok || proxy == "" {
+		if root.Proxy == "" {
 			return nil, errors.New("web route is not a proxy")
 		}
-		parsedAddress.proxy = proxy
+		parsedAddress.proxy = root.Proxy
 		routes = append(routes, parsedAddress)
 	}
 	return routes, nil
 }
 
 func parseRouteAddress(address string) (serveRoute, error) {
+	if !strings.Contains(address, "://") {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || host == "" || port == "" {
+			return serveRoute{}, errors.New("invalid route address")
+		}
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return serveRoute{}, errors.New("invalid route port")
+		}
+		return serveRoute{port: value, host: normalizeDNSName(host), path: "/"}, nil
+	}
 	parsed, err := url.Parse(address)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.ForceQuery || parsed.Opaque != "" {
 		return serveRoute{}, errors.New("invalid route address")

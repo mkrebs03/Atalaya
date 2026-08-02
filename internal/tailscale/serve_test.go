@@ -16,6 +16,10 @@ func emptyServeStatus() []byte {
 }
 
 func exactServeStatus() []byte {
+	return []byte("{\"TCP\":{\"443\":{\"HTTPS\":true},\"9474\":{\"HTTPS\":true}},\"Web\":{\"oracle.example.ts.net:443\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8080\"}}},\"oracle.example.ts.net:9474\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:9474\"}}}}}")
+}
+
+func legacyExactServeStatus() []byte {
 	return []byte("{\"Web\":{\"https://oracle.example.ts.net/\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8080\"}}},\"https://oracle.example.ts.net:9474/\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:9474\"}}}}}")
 }
 
@@ -83,7 +87,7 @@ func TestConfigureAddsBothRoutesAndVerifiesThem(t *testing.T) {
 				return emptyServeStatus(), nil
 			}
 			return exactServeStatus(), nil
-		case "serve --https=443 http://127.0.0.1:8080", "serve --https=9474 http://127.0.0.1:9474":
+		case "serve --bg --https=443 http://127.0.0.1:8080", "serve --bg --https=9474 http://127.0.0.1:9474":
 			return nil, nil
 		default:
 			return nil, errors.New("unexpected command")
@@ -98,6 +102,30 @@ func TestConfigureAddsBothRoutesAndVerifiesThem(t *testing.T) {
 	}
 	if serveStatusCalls != 2 {
 		t.Fatalf("serve status calls = %d, want 2", serveStatusCalls)
+	}
+}
+
+func TestConfigureKeepsLegacyURLServeStatusCompatibility(t *testing.T) {
+	serveStatusCalls := 0
+	runner := Runner(func(_ context.Context, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "version":
+			return []byte("1.86.2\n"), nil
+		case "status --json":
+			return connectedStatus(), nil
+		case "serve status --json":
+			serveStatusCalls++
+			return legacyExactServeStatus(), nil
+		default:
+			return nil, errors.New("unexpected command")
+		}
+	})
+	result, err := (Adapter{Command: runner, Architecture: "amd64", Matrix: DefaultVersionMatrix}).Configure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Routes) != 2 || serveStatusCalls != 2 {
+		t.Fatalf("result = %+v, serve status calls = %d", result, serveStatusCalls)
 	}
 }
 
@@ -124,7 +152,7 @@ func TestConfigureRoleSpecificRoutesDoesNotClaimDashboard(t *testing.T) {
 		t.Fatalf("routes = %+v", result.Routes)
 	}
 	for _, call := range calls {
-		if strings.Join(call, " ") == "serve --https=443 http://127.0.0.1:8080" {
+		if strings.Join(call, " ") == "serve --bg --https=443 http://127.0.0.1:8080" {
 			t.Fatal("agent route configuration claimed dashboard port")
 		}
 	}
