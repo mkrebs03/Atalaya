@@ -56,6 +56,8 @@ FAKE_BINARY="$TEST_ROOT/atalaya-fake"
 FAKE_SYSTEMCTL="$TEST_ROOT/systemctl-fake"
 SYSTEMCTL_LOG="$TEST_ROOT/systemctl.log"
 CURL_ATTEMPTS="$TEST_ROOT/curl-attempts"
+DEV_API_FIXTURE="$TEST_ROOT/dev-releases.json"
+DEV_ARTIFACT_ROOT="$TEST_ROOT/dev-resolved-release"
 mkdir -p "$FAKE_BIN_DIR"
 cat > "$FAKE_BINARY" <<'EOF'
 #!/bin/sh
@@ -107,8 +109,47 @@ cat > "$FAKE_SYSTEMCTL" <<'EOF'
 printf '%s\n' "$*" >> "$ATALAYA_SYSTEMCTL_LOG"
 EOF
 chmod 0755 "$FAKE_SYSTEMCTL"
+mkdir -p "$DEV_ARTIFACT_ROOT"
+cp "$TRUE_BINARY" "$DEV_ARTIFACT_ROOT/atalaya-linux-$ARCH"
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$DEV_ARTIFACT_ROOT" && sha256sum "atalaya-linux-$ARCH" > SHA256SUMS)
+else
+  (cd "$DEV_ARTIFACT_ROOT" && shasum -a 256 "atalaya-linux-$ARCH" > SHA256SUMS)
+fi
+cat > "$DEV_API_FIXTURE" <<'EOF'
+[
+  {"tag_name":"dev-59-deadbee","draft":false,"prerelease":true},
+  {"tag_name":"dev-58-abcdef0","draft":false,"prerelease":true},
+  {"tag_name":"v0.0.1","draft":false,"prerelease":false}
+]
+EOF
 cat > "$FAKE_BIN_DIR/curl" <<'EOF'
 #!/bin/sh
+output=
+url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output|-o)
+      output=$2
+      shift 2
+      ;;
+    *)
+      url=$1
+      shift
+      ;;
+  esac
+done
+if [ "$url" = "https://api.github.com/repos/example/Atalaya/releases?per_page=100" ]; then
+  cp "$ATALAYA_DEV_API_FIXTURE" "$output"
+  exit 0
+fi
+case "$url" in
+  https://github.com/example/Atalaya/releases/download/dev-59-deadbee/*)
+    artifact=${url##*/}
+    cp "$ATALAYA_DEV_ARTIFACT_ROOT/$artifact" "$output"
+    exit 0
+    ;;
+esac
 count=0
 if [ -f "$ATALAYA_CURL_ATTEMPTS" ]; then
   count=$(cat "$ATALAYA_CURL_ATTEMPTS")
@@ -123,6 +164,24 @@ EOF
 chmod 0755 "$FAKE_BIN_DIR/curl"
 cp "$FAKE_BINARY" "$ARTIFACT_ROOT/atalaya-linux-$ARCH"
 write_checksum
+
+if ATALAYA_ROOT="$TEST_ROOT/resolved-root" \
+  ATALAYA_DNS_NAME=oracle.example.ts.net \
+  ATALAYA_SKIP_SYSTEM_USER=1 \
+  ATALAYA_SYSTEMCTL=true \
+  ATALAYA_DEV_API_FIXTURE="$DEV_API_FIXTURE" \
+  ATALAYA_DEV_ARTIFACT_ROOT="$DEV_ARTIFACT_ROOT" \
+  PATH="$FAKE_BIN_DIR:$PATH" \
+  sh "$SCRIPT_DIR/install.sh" server \
+    --channel dev \
+    --base-url "https://github.com/example/Atalaya/releases" \
+    --no-start; then
+  :
+else
+  printf '%s\n' "dev release resolver installation failed" >&2
+  exit 1
+fi
+test -x "$TEST_ROOT/resolved-root/usr/local/bin/atalaya"
 
 if command -v script >/dev/null 2>&1; then
   PIPE_ROOT="$TEST_ROOT/piped-root"
@@ -151,6 +210,7 @@ EOF
   fi
 fi
 
+: > "$CURL_ATTEMPTS"
 if ATALAYA_ROOT="$TEST_ROOT/root" \
   ATALAYA_DNS_NAME=oracle.example.ts.net \
   ATALAYA_SKIP_SYSTEM_USER=1 \

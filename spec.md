@@ -220,14 +220,15 @@ Atalaya define dos canales de distribucion en v1:
 
 - `stable`: releases oficiales con tags inmutables `vMAJOR.MINOR.PATCH`, destinadas a
   usuarios finales y a instalaciones de produccion.
-- `dev`: una release rolling publica, marcada como pre-release y actualizada despues
-  de cada ejecucion exitosa de CI sobre `main`. El tag `dev` puede moverse y sus
-  artefactos pueden reemplazarse; este canal no tiene soporte de produccion.
+- `dev`: un canal publico de pre-releases historicas, actualizado despues de cada
+  ejecucion exitosa de CI sobre `main`. Cada build usa un tag inmutable unico con el
+  formato `dev-<run>-<short-sha>`; el instalador resuelve el build mas reciente. Este
+  canal no tiene soporte de produccion.
 
 El canal `stable` se publica mediante una Release PR aprobada. El canal `dev` debe
-identificar dentro del binario el commit exacto que produjo sus artefactos. `latest`
-solo puede resolver el canal `stable`; instalar `dev` requiere seleccionar el canal
-explicitamente.
+identificar dentro del binario el commit exacto que produjo sus artefactos y conservar
+cada build publicado para permitir auditoria y rollback. `latest` solo puede resolver
+el canal `stable`; instalar `dev` requiere seleccionar el canal explicitamente.
 
 El mismo ejecutable PUEDE ofrecer modos y comandos como:
 
@@ -248,8 +249,8 @@ El instalador DEBE:
 
 - Detectar arquitectura soportada.
 - Verificar checksum o firma del artefacto.
-- Aceptar `--channel dev` para instalar o actualizar el ultimo artefacto del canal
-  rolling de desarrollo. `--channel dev` no puede combinarse con `--version`.
+- Aceptar `--channel dev` para instalar o actualizar el artefacto mas reciente del
+  canal de desarrollo. `--channel dev` no puede combinarse con `--version`.
 - Crear usuario, directorios y permisos restringidos.
 - Generar configuracion y clave maestra cuando corresponda.
 - Instalar y arrancar unidades `systemd` para rol server o agent por default. Un modo

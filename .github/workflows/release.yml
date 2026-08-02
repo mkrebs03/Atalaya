@@ -174,21 +174,30 @@ jobs:
         run: |
           short_sha="$(git rev-parse --short=7 "$CI_SHA")"
           version="0.0.0-dev.${CI_RUN_NUMBER}.${short_sha}"
+          dev_tag="dev-${CI_RUN_NUMBER}-${short_sha}"
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$dev_tag" >> "$GITHUB_OUTPUT"
       - name: Fetch tags for freshness check
         run: git fetch --force --tags origin
-      - name: Skip stale CI result
+      - name: Skip stale or already published dev result
         id: freshness
         run: |
+          latest_tag="$(git tag --list 'dev-[0-9]*-[0-9a-f]*' --sort=-version:refname | head -n 1)"
           current_sha=
-          if git show-ref --verify --quiet refs/tags/dev; then
-            current_sha="$(git rev-parse refs/tags/dev^{})"
+          if [ -n "$latest_tag" ]; then
+            current_sha="$(git rev-parse "$latest_tag^{commit}")"
           fi
           publish=true
-          if [ -n "$current_sha" ] && [ "$current_sha" != "$CI_SHA" ] && git merge-base --is-ancestor "$CI_SHA" "$current_sha"; then
+          if [ "$current_sha" = "$CI_SHA" ]; then
+            is_draft="$(gh release view "$latest_tag" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+            if [ "$is_draft" = false ]; then
+              publish=false
+              echo "dev already published for this commit: $latest_tag"
+            fi
+          elif [ -n "$current_sha" ] && git merge-base --is-ancestor "$CI_SHA" "$current_sha"; then
             publish=false
-            echo "dev already points at a newer commit: $current_sha"
+            echo "dev already has a newer published build: $latest_tag ($current_sha)"
           fi
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
       - name: Build dev artifacts
@@ -200,7 +209,7 @@ jobs:
           cat > build/dev/RELEASE-NOTES.md <<EOF
           ## Atalaya dev
 
-          This rolling pre-release is built from commit ${CI_SHA} after the CI workflow completed successfully.
+          This immutable pre-release is built from commit ${CI_SHA} after the CI workflow completed successfully.
 
           - Application version: ${{ steps.metadata.outputs.version }}
           - CI run: ${CI_RUN_NUMBER}
@@ -208,38 +217,27 @@ jobs:
           - SHA-256 checksums: included in SHA256SUMS.
           - This channel is unstable and must not be used for production data.
           EOF
-      - name: Recreate immutable dev release
+      - name: Publish immutable dev release
         if: steps.freshness.outputs.publish == 'true'
         run: |
-          tag_ref="repos/${GITHUB_REPOSITORY}/git/refs/tags/dev"
-          if gh release view dev >/dev/null 2>&1; then
-            # Published releases are immutable. Delete the old release before
-            # moving its rolling tag; stable releases remain historical.
-            gh release delete dev --yes
-          fi
-          if git show-ref --verify --quiet refs/tags/dev; then
-            updated=false
-            for attempt in 1 2 3 4 5; do
-              if gh api --method PATCH "$tag_ref" -f sha="$CI_SHA" -F force=true >/dev/null; then
-                updated=true
-                break
-              fi
-              if [ "$attempt" -lt 5 ]; then
-                sleep 2
-              fi
-            done
-            [ "$updated" = true ]
+          dev_tag="${{ steps.metadata.outputs.tag }}"
+          if gh release view "$dev_tag" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$dev_tag" --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != true ]; then
+              echo "dev release already published: $dev_tag"
+              exit 0
+            fi
           else
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref=refs/tags/dev \
-              -f sha="$CI_SHA" >/dev/null
+            gh release create "$dev_tag" \
+              --draft \
+              --target "$CI_SHA" \
+              --title "Atalaya dev ${dev_tag#dev-}" \
+              --notes-file build/dev/RELEASE-NOTES.md
           fi
-          gh release create dev \
+          gh release upload "$dev_tag" \
             build/dev/atalaya-linux-amd64 \
             build/dev/atalaya-linux-arm64 \
             build/dev/install.sh \
             build/dev/SHA256SUMS \
-            --target "$CI_SHA" \
-            --title "Atalaya dev" \
-            --notes-file build/dev/RELEASE-NOTES.md \
-            --prerelease
+            --clobber
+          gh release edit "$dev_tag" --draft=false --prerelease
