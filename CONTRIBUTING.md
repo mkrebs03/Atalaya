@@ -57,8 +57,9 @@ Release PR. La primera release se inicializa como `0.0.1` mediante ese mecanismo
 
 El workflow necesita el secret de Actions `ATALAYA_RELEASE_TOKEN`, con permisos para
 crear PRs, tags, releases y actualizar `CHANGELOG.md`. Debe ser un token de
-automatización dedicado; además, el repositorio debe permitir que Actions cree y
-apruebe pull requests.
+automatización dedicado y con alcance mínimo al repositorio. La opción de permitir que
+`GITHUB_TOKEN` apruebe pull requests debe permanecer desactivada; el workflow no debe
+aprobar sus propios cambios.
 
 Para inicializar la primera release, agrega una sola vez el footer `Release-As: 0.0.1`
 en un commit de `main`. Release Please abrirá la Release PR correspondiente; al
