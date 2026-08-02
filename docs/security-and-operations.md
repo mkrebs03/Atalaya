@@ -241,6 +241,25 @@ comando rechaza sobrescribir un archivo existente, y la documentacion exige cust
 ambos artefactos en ubicaciones o mecanismos de cifrado distintos. v1 no
 afirma cifrar esos artefactos: quien obtenga DB y clave puede leer secretos.
 
+Ejemplo de backup operativo:
+
+```bash
+sudo install -d -m 0700 /var/backups/atalaya
+sudo /usr/local/bin/atalaya backup \
+  --config /etc/atalaya/server.yaml \
+  --output /var/backups/atalaya/data.tar.gz
+sudo /usr/local/bin/atalaya backup-key \
+  --config /etc/atalaya/server.yaml \
+  --output /var/backups/atalaya/master.key \
+  --yes
+sudo /usr/local/bin/atalaya verify --config /etc/atalaya/server.yaml
+```
+
+Estos archivos son ejemplos de salida local, no una política de custodia. Tras
+verificar el backup, conserva los datos y `master.key` mediante ubicaciones o
+mecanismos de cifrado distintos. No copies una base SQLite viva ignorando sus archivos
+WAL.
+
 Procedimiento de restauracion:
 
 1. Detener servidor.
@@ -257,6 +276,118 @@ debe ser acotada y configurable. Se recomiendan copias separadas de datos y clav
 fuera del host central, pero su automatización queda fuera de v1.
 
 ## 9. Instalacion y releases
+
+### Instalacion estable recomendada
+
+Requiere Linux con `systemd`, Tailscale instalado, autenticado y conectado, y
+`curl` o `wget`. El instalador no instala Tailscale ni abre un listener publico.
+
+Para instalar el servidor con la ultima release estable:
+
+```bash
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh" \
+  --output install.sh
+sh -n install.sh
+sudo sh install.sh server
+```
+
+Si el host solo dispone de `wget`, el equivalente es:
+
+```bash
+wget --https-only --output-document=install.sh \
+  "https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh"
+sh -n install.sh
+sudo sh install.sh server
+```
+
+El rol `server` instala tambien el agente local, crea la base de datos y la clave
+maestra, configura Tailscale Serve en 443 y 9474, y solicita la contraseña del
+administrador en una terminal interactiva. La URL publica esperada es
+`https://<servidor>.ts.net`.
+
+Para agregar un agente Linux remoto, repite la descarga y la inspeccion en ese host
+y ejecuta:
+
+```bash
+sudo sh install.sh agent \
+  --server-url https://<servidor>.ts.net
+```
+
+Luego crea un token temporal desde **Gestionar** en el servidor y completa el
+enrolamiento:
+
+```bash
+sudo /usr/local/bin/atalaya agent enroll \
+  --config /etc/atalaya/agent.yaml \
+  --display-name "<nombre-del-host>"
+```
+
+El token se solicita sin eco o puede entregarse mediante un archivo `0600` temporal.
+Nunca debe aparecer como argumento, en una variable persistente o en el historial del
+shell. `--display-name` pertenece al enrolamiento; no es necesario durante la
+instalacion del agente.
+
+### Instalacion reproducible
+
+Las releases estables usan tags inmutables. Para fijar una version concreta, descarga
+e inspecciona el instalador de ese tag y pasa la misma version al script:
+
+```bash
+ATALAYA_VERSION=v0.0.1
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://github.com/mkrebs03/Atalaya/releases/download/${ATALAYA_VERSION}/install.sh" \
+  --output install.sh
+sh -n install.sh
+sudo sh install.sh server --version "$ATALAYA_VERSION"
+```
+
+Usa la misma version para instalar un agente remoto. `--version` tambien puede fijar
+la version de un upgrade.
+
+### Canal `dev`
+
+El canal `dev` es una release rolling publica, reemplazada despues de cada CI exitoso
+sobre `main`. Es util para probar el estado integrado mas reciente, pero no tiene
+compatibilidad hacia adelante ni debe usarse con datos de produccion.
+
+```bash
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh" \
+  --output install.sh
+sh -n install.sh
+sudo sh install.sh server --channel dev
+```
+
+Para actualizar una instalacion existente con el mismo canal:
+
+```bash
+sudo sh install.sh upgrade --channel dev
+```
+
+`--channel dev` no se combina con `--version`. Para una instalacion estable, omite
+`--channel` o pasa un tag estable mediante `--version`.
+
+### Actualizacion
+
+Para actualizar a la ultima release estable, descarga e inspecciona el instalador y
+ejecuta `upgrade`:
+
+```bash
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh" \
+  --output install.sh
+sh -n install.sh
+sudo sh install.sh upgrade
+```
+
+Para el canal `dev`, usa el instalador descargado desde `/releases/download/dev/` y
+añade `--channel dev`, como en el procedimiento anterior.
+
+El upgrade detiene los servicios, crea un backup local previo a la migracion, instala
+el binario y las units, ejecuta `migrate` y `verify`, comprueba salud y conserva un
+rollback si alguno de esos pasos falla. No uses `--no-start` para un upgrade normal;
+esa opcion queda reservada para restore y mantenimiento offline.
 
 Una release `stable` incluye:
 
@@ -326,6 +457,22 @@ Comando `curl | sh` puede ofrecer conveniencia, pero documentacion tambien debe 
 descarga, inspeccion y ejecucion separadas.
 
 ## 10. Logs y diagnostico
+
+Comprobaciones basicas despues de instalar o actualizar el servidor:
+
+```bash
+sudo systemctl is-active atalaya-server.service
+sudo systemctl is-active atalaya-agent.service
+curl -fsS http://127.0.0.1:8080/healthz
+curl -fsS http://127.0.0.1:9474/agent/v1/healthz
+sudo /usr/local/bin/atalaya verify --config /etc/atalaya/server.yaml
+```
+
+Los logs se consultan con `journalctl`:
+
+```bash
+sudo journalctl -u atalaya-server.service -u atalaya-agent.service --no-pager
+```
 
 - Logs estructurados a stdout/stderr; `journald` gestiona persistencia.
 - Cada request recibe `request_id`.
