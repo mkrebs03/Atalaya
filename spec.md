@@ -1,6 +1,6 @@
-# Atalaya - Especificacion de producto
+# Atalaya - Especificación de producto
 
-Estado: aprobado para implementacion de v1.
+Estado: alcance de la primera release pública.
 
 Este documento define que debe hacer el producto. Las decisiones de arquitectura,
 datos, API, seguridad y despliegue viven en [`docs/`](docs/README.md).
@@ -11,14 +11,14 @@ documentacion.
 
 ## 1. Vision
 
-Atalaya es un dashboard personal para observar hosts Linux y servicios
+Atalaya es un dashboard self-hosted para observar hosts Linux y servicios
 self-hosted accesibles por una red Tailscale. Debe ofrecer estado actual, historico,
 alertas y configuracion desde una interfaz web, con operacion sencilla y pocos
 componentes.
 
-El sistema comienza en una VM Oracle y debe permitir agregar hosts y servicios sin
-refactorizar su arquitectura. Es un proyecto personal; una posible publicacion futura
-no justifica agregar multiusuario ni abstracciones innecesarias en v1.
+El despliegue de referencia comienza en una VM Linux y debe permitir agregar hosts y
+servicios sin refactorizar su arquitectura. v1 mantiene deliberadamente un único
+administrador y evita abstracciones que no sean necesarias para ese alcance.
 
 ## 2. Principios
 
@@ -40,7 +40,7 @@ no justifica agregar multiusuario ni abstracciones innecesarias en v1.
 
 - Un unico usuario administrador.
 - Todos los hosts monitoreados usan Linux y permanecen normalmente encendidos.
-- La VM Oracle aloja inicialmente servidor, frontend y un agente local.
+- El host principal aloja inicialmente servidor, frontend y un agente local.
 - Navegadores objetivo: versiones actuales de Firefox, Chrome y Safari, en escritorio
   y telefono.
 - La aplicacion no se expone directamente a Internet publico.
@@ -51,7 +51,7 @@ no justifica agregar multiusuario ni abstracciones innecesarias en v1.
 
 El sistema DEBE:
 
-- Monitorear inicialmente la VM Oracle.
+- Monitorear inicialmente el host donde se ejecuta el servidor.
 - Permitir registrar otros hosts desde la UI mediante tokens de enrolamiento de un
   solo uso y duracion limitada.
 - Obtener snapshots de cada agente cada 60 segundos por defecto.
@@ -239,8 +239,7 @@ El instalador DEBE:
 - Generar configuracion y clave maestra cuando corresponda.
 - Instalar y arrancar unidades `systemd` para rol server o agent por default. Un modo
   explicito `--no-start` permite restaurar, migrar y verificar antes del primer arranque.
-  En Oracle, instalar el rol server configura tambien el agente local, su credencial y
-  su unidad.
+  Instalar el rol server configura también el agente local, su credencial y su unidad.
 - Ser repetible sin destruir configuracion ni datos existentes.
 
 `atalaya backup` DEBE excluir la clave maestra. La clave se exporta mediante
@@ -253,11 +252,11 @@ dentro de la tailnet mediante Tailscale Serve segun
 
 ## 5. Limitacion conocida de v1
 
-Servidor, evaluador de alertas y agente inicial viven en Oracle. Si Oracle cae por
-completo, ningun proceso local puede enviar una alerta.
+Servidor, evaluador de alertas y agente inicial viven en el mismo host principal. Si
+ese host cae por completo, ningún proceso local puede enviar una alerta.
 
-v1 DEBE mostrar y documentar esta limitacion, pero NO DEBE depender de un servicio
-externo. Una fase futura agregara un watchdog minimo en otro host propio siempre
+v1 DEBE mostrar y documentar esta limitación, pero NO DEBE depender de un servicio
+externo. Una iteración posterior podrá agregar un watchdog mínimo en otro host propio siempre
 encendido. Ese watchdog detectara ausencia del servidor y enviara notificacion sin
 alojar dashboard ni historico.
 
@@ -277,8 +276,7 @@ alojar dashboard ni historico.
   host, alcanzable via tailnet o CIDR privado autorizado.
 - Alta disponibilidad del servidor o replicacion de SQLite.
 - Descubrimiento automatico de hosts o servicios de la tailnet.
-- Watchdog externo a Oracle.
-- Integraciones con infraestructura laboral.
+- Watchdog externo al host principal.
 
 ## 7. Direccion posterior a v1
 
@@ -289,7 +287,7 @@ Posibles extensiones, no compromisos:
 - Checks adicionales.
 - Reglas de mantenimiento y silencios programados.
 - Comparacion entre hosts y dashboards personalizables.
-- Publicacion del proyecto y paquetes `.deb`/`.rpm`.
+- Paquetes `.deb`/`.rpm`.
 - Checks locales especificos, como presencia de una sesion tmux o estado de
   contenedores Docker leidos por el agente.
 
@@ -304,8 +302,8 @@ v1 se considera completa cuando:
    `systemd` sin instalar runtime de desarrollo.
 2. Un administrador puede crearse y recuperar contraseña localmente.
 3. Usuario no autenticado no puede leer metricas, historico o configuracion.
-4. Una instalacion server en Oracle crea automaticamente su agente local y Oracle
-   aparece en dashboard con CPU, memoria, uptime y filesystems reales.
+4. Una instalación server crea automáticamente su agente local y el host principal
+   aparece en el dashboard con CPU, memoria, uptime y filesystems reales.
 5. Segundo host puede enrolarse con token temporal y comenzar a ser consultado.
 6. Detener un agente produce estado no disponible y alerta tras umbral configurado.
 7. Checks HTTP y TCP pueden gestionarse desde UI, respetan la politica de red y
@@ -329,4 +327,4 @@ v1 se considera completa cuando:
 - [Modelo de dominio y datos](docs/domain-model.md)
 - [API y protocolos](docs/api.md)
 - [Seguridad y operacion](docs/security-and-operations.md)
-- [Plan de implementacion](docs/implementation-plan.md)
+- [Roadmap](docs/roadmap.md)

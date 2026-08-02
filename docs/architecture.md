@@ -15,9 +15,8 @@ fijado en `11.16.0` mediante `packageManager` y el lockfile. Tailscale es una
 dependencia del sistema validada por capacidades: cada release
 prueba en CI la version estable vigente y la version mas antigua incluida en su matriz
 de compatibilidad, sin prometer un minimo global independiente de la release.
-El modulo Go canonico es `github.com/mkrebs03/atalaya`; no depende del nombre comercial
-que pueda adoptar el producto. La integracion continua corre en GitHub Actions: lint,
-tests, build y la matriz Tailscale por release.
+El módulo Go canónico es `github.com/mkrebs03/atalaya`. La integración continua corre
+en GitHub Actions: lint, tests, build y la matriz Tailscale por release.
 
 Dependencias Go fundacionales aprobadas para v1:
 
@@ -28,11 +27,11 @@ Dependencias Go fundacionales aprobadas para v1:
 - `golang.org/x/term` para detectar la terminal local usada al ingresar passwords.
 - `go.yaml.in/yaml/v3` para los archivos de configuracion YAML.
 
-Fase 0 fijo SQLite, Argon2id y YAML; Fase 1A incorporo `x/sys` y `x/term` y puso esas
-dependencias al servicio de persistencia, configuracion, clave maestra y creacion del
-administrador. Una prueba de compatibilidad continua ejercitando SQLite en memoria,
-Argon2id y decodificacion YAML estricta con `CGO_ENABLED=0`; el build tambien la
-compila, sin ejecutarla, para Linux `amd64` y `arm64`.
+SQLite, Argon2id y YAML son dependencias fundacionales; `x/sys` y `x/term` respaldan
+la persistencia, la configuración, la clave maestra y la creación del administrador.
+Una prueba de compatibilidad continua ejercita SQLite en memoria, Argon2id y
+decodificación YAML estricta con `CGO_ENABLED=0`; el build también la compila, sin
+ejecutarla, para Linux `amd64` y `arm64`.
 
 El resto usa biblioteca estandar salvo que una dependencia nueva reduzca riesgo o
 complejidad de forma demostrable. Toda dependencia directa queda fijada en `go.mod` y
@@ -48,45 +47,44 @@ revisada junto con su licencia y soporte de las dos arquitecturas objetivo.
 - CSS propio; no framework visual en v1.
 - Pinia solo si aparece estado global no resuelto limpiamente con composables.
 
-La base se genero con `create-vue 3.22.4`, usando TypeScript, Router, Vitest,
-Playwright, ESLint y Prettier, sin JSX, Pinia ni DevTools. Vite produce `web/dist`
-antes de cualquier test, vet o build Go que requiera el paquete `web`; Go lo incluye
-con `go:embed` y sirve UI y API desde mismo origen. Node.js no forma parte del runtime
-ni del instalador. La instalacion npm usa un stamp derivado del manifiesto, lockfile y
-toolchain; no usa hooks de lifecycle para modificar el arbol de dependencias.
+Vite produce `web/dist` antes de cualquier test, vet o build Go que requiera el paquete
+`web`; Go lo incluye con `go:embed` y sirve UI y API desde el mismo origen. Node.js no
+forma parte del runtime ni del instalador. La instalación npm usa un stamp derivado del
+manifiesto, lockfile y toolchain; no usa hooks de lifecycle para modificar el árbol de
+dependencias.
 
 ## 2. Topologia v1
 
 ```text
-Browser in tailnet
+Navegador dentro de la tailnet
        |
        | HTTPS / Tailscale Serve
        v
-+---------------- Oracle VM ----------------+
++------------- Atalaya server host --------+
 | atalaya server                             |
-|  - Vue assets                              |
-|  - JSON API                                |
+|  - assets Vue                              |
+|  - API JSON                                |
 |  - scheduler / collector                   |
-|  - service checker                         |
-|  - alert evaluator                         |
-|  - notification dispatcher                |
+|  - checks de servicio                      |
+|  - evaluador de alertas                    |
+|  - dispatcher de notificaciones            |
 |  - SQLite                                  |
 |                                            |
-| atalaya agent <---- authenticated pull ----+
+| atalaya agent <---- pull autenticado ------+
 +--------------------------------------------+
        |
-       | authenticated pull over tailnet
+       | pull autenticado por la tailnet
        v
-+-------------- Other Linux host ------------+
-| atalaya agent                              |
++--------------- Host Linux remoto ----------+
+| agente Atalaya                             |
 +--------------------------------------------+
 ```
 
 Tailscale Serve termina HTTPS del dashboard en puerto 443. Cada agente escucha HTTP
 solo en `127.0.0.1:9474`; Tailscale Serve del host publica ese listener mediante HTTPS
-en puerto 9474. El servidor consulta `https://<magicdns>:9474`. En Oracle ambas rutas
-coexisten: dashboard en 443 y agente en 9474. Certificados y renovacion pertenecen a
-Tailscale Serve, no al proyecto.
+en puerto 9474. El servidor consulta `https://<magicdns>:9474`. En el host del
+servidor ambas rutas coexisten: dashboard en 443 y agente en 9474. Certificados y
+renovación pertenecen a Tailscale Serve, no al proyecto.
 
 El puerto HTTPS 9474 es fijo en v1 y `agent_url` acepta exclusivamente
 `https://<fqdn>.ts.net:9474`. El
@@ -101,8 +99,8 @@ loopback configurado. La sintaxis exacta de CLI se adapta a la version de Tailsc
 detectada y se prueba antes de guardar config. Trafico HTTP sin cifrar queda
 limitado a loopback; el acceso HTTPS publicado se autoriza mediante ACLs/grants de la
 tailnet.
-Instalar el rol server en Oracle instala tambien el agente local y genera directamente
-su credencial; no usa un token de UI ni requiere una segunda instalacion manual.
+Instalar el rol server instala también el agente local y genera directamente su
+credencial; no usa un token de UI ni requiere una segunda instalación manual.
 
 ## 3. Responsabilidades
 
@@ -167,7 +165,7 @@ Limites importan mas que nombres exactos. Paquetes de dominio no deben importar 
 HTTP ni componentes Vue. Adaptadores externos implementan interfaces pequenas dentro
 del modulo que los consume.
 
-Fase 6 agrega tres piezas operativas:
+La operación de release agrega tres piezas operativas:
 
 - internal/backup valida el estado vigente, crea el snapshot SQLite con VACUUM INTO y
   empaqueta manifest, base y configuracion no secreta; la clave maestra se exporta por
@@ -202,8 +200,8 @@ SHA256SUMS, el instalador y las notas de la matriz Tailscale.
    `GET /agent/v1/snapshot` usando esa credencial.
 10. Primer pull valido cambia host de `pending` a observado.
 
-Para Oracle, `atalaya bootstrap local-agent` crea de forma idempotente el host,
-credencial cifrada y configuracion del agente. Una primera transaccion crea o recupera
+En el host del servidor, `atalaya bootstrap local-agent` crea de forma idempotente el
+host, credencial cifrada y configuración del agente. Una primera transacción crea o recupera
 el unico `source=local` incompleto; despues se escriben credencial y YAML atomicamente,
 y una segunda transaccion fija `bootstrap_completed_at` y agenda el primer slot. El
 host incompleto no es visible ni schedulable. El
@@ -248,8 +246,7 @@ devolver credencial.
    payload. Clock skew absoluto mayor a cinco minutos degrada sin invalidar el resto.
 5. En una transaccion actualiza estado actual, completa el slot y, si el target sigue
    habilitado, crea exactamente el siguiente slot de la cadencia nominal con jitter
-   pequeno. Fase 2A no crea muestras crudas; `MetricSample` comienza en Fase 3 y
-   entonces comparte esta frontera transaccional.
+   pequeño. La persistencia de muestras crudas comparte esta frontera transaccional.
 6. Libera el lease despues del commit.
 7. Evaluador procesa reglas relacionadas despues de persistencia.
 

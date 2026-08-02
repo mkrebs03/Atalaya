@@ -163,7 +163,8 @@ no deben convertir dashboard en proxy interno arbitrario.
   dialer que conecta IP validada.
 - Limitar headers, cuerpo descartado, tiempo y concurrencia.
 
-Oracle metadata (`169.254.169.254`) permanece bloqueada siempre en v1.
+El endpoint de metadata de proveedores cloud (`169.254.169.254`) permanece bloqueado
+siempre en v1.
 Loopback, link-local, multicast, unspecified y metadata no pueden habilitarse mediante
 CIDR. Validacion al guardar revisa sintaxis; cada ejecucion y redirect vuelve a resolver
 y exige que todas las IPs resultantes cumplan politica. Resultado mixto se rechaza.
@@ -252,22 +253,22 @@ Procedimiento de restauracion:
 
 Antes de cada migracion de upgrade, crear backup automatico local de datos. La clave
 existente no se copia porque v1 no la rota durante migraciones. Retencion de backups
-debe ser acotada y configurable. Copias separadas de datos y clave fuera de Oracle son
-recomendadas, pero su automatizacion queda fuera de v1.
+debe ser acotada y configurable. Se recomiendan copias separadas de datos y clave
+fuera del host central, pero su automatización queda fuera de v1.
 
 ## 9. Instalacion y releases
 
 Release incluye:
 
 - Ejecutables `linux/amd64` y `linux/arm64`.
-- Checksums SHA-256 publicados y obligatorios; no se añade Sigstore en Fase 6.
+- Checksums SHA-256 publicados y obligatorios; la primera release no requiere Sigstore.
 - Script de instalacion versionado.
 - Notas con migraciones y compatibilidad de agente.
 
 Instalador:
 
-- Acepta `server`, `agent` y `upgrade`. El rol `server` en Oracle instala tambien el
-  agente local y lo registra sin token de UI.
+- Acepta `server`, `agent` y `upgrade`. El rol `server` instala también el agente local
+  y lo registra sin token de UI.
 - Acepta `--no-start` para restore y mantenimiento offline; en ese modo instala
   artefactos y units, pero no inicia ni reinicia servicios.
 - Descarga por HTTPS y verifica checksum antes de reemplazar binario.
@@ -282,7 +283,7 @@ Instalador:
 - No instala Tailscale silenciosamente.
 - No ejecuta migracion destructiva sin backup.
 
-La release publica la matriz efectiva usada por el adaptador: en esta fase el rango
+La release publica la matriz efectiva usada por el adaptador: en esta release el rango
 automatizado es Tailscale 1.52.0 a 1.99.x, con una version estable probada indicada en
 las notas de cada release. La compatibilidad se decide por la capacidad observada
 serve_https_443_9474, no por un fallback de puerto. El adaptador exige
@@ -326,10 +327,10 @@ descarga, inspeccion y ejecucion separadas.
 
 ## 11. Disponibilidad y watchdog
 
-v1 no puede avisar caida total de Oracle. No fingir cobertura mediante job dentro del
-mismo servidor.
+v1 no puede avisar la caída total del host central. No fingir cobertura mediante un
+job dentro del mismo servidor.
 
-Fase futura instala watchdog minimo en segundo host propio:
+Una iteración posterior puede instalar un watchdog mínimo en un segundo host propio:
 
 - Consulta endpoint autenticado o heartbeat de servidor.
 - Mantiene estado y cooldown local pequenos.

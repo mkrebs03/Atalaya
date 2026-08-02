@@ -247,7 +247,7 @@ estado/series/alertas y no crea otro slot.
 
 ### MetricSample
 
-Esta entidad comienza a persistirse en Fase 3. Fase 2A conserva exclusivamente estado
+Esta entidad se persiste junto con el histórico de métricas. El estado actual conserva
 actual de host/filesystem y resultado/slot de scheduling; no crea muestras raw.
 
 Series crudas separan dimensiones para consultas acotadas:

@@ -1,234 +1,196 @@
 # Atalaya
 
-Atalaya es un dashboard personal para observar hosts Linux y servicios self-hosted
-dentro de una red Tailscale. Tras completar persistencia, autenticacion y la Fase 2,
-la Fase 3 agrega series historicas, rollups horarios, retencion configurable y
-graficos con huecos explicitos. El alcance exacto de cada slice permanece definido por
-la documentacion.
+[![CI](https://github.com/mkrebs03/Atalaya/actions/workflows/ci.yml/badge.svg)](https://github.com/mkrebs03/Atalaya/actions/workflows/ci.yml)
 
-El producto completo sigue el contrato de [`spec.md`](spec.md). El indice y la
-precedencia de decisiones tecnicas estan en [`docs/README.md`](docs/README.md).
+Atalaya es una plataforma de monitorización privada para hosts Linux y servicios
+self-hosted dentro de una red Tailscale. Reúne métricas actuales, histórico,
+checks de servicio y alertas en una interfaz web sencilla, con un único binario,
+SQLite y `systemd`.
 
-## Requisitos de desarrollo
+El acceso de la aplicación permanece dentro de la tailnet: Tailscale Serve termina
+HTTPS y el servidor solo escucha en loopback. Atalaya no necesita Docker, Node.js,
+Go, nginx ni una base de datos externa en runtime.
+
+## Qué incluye
+
+- Métricas de CPU, memoria, uptime, Tailscale y filesystems de hosts Linux.
+- Histórico de métricas con muestras crudas, agregados horarios y retención configurable.
+- Checks HTTP/HTTPS y TCP ejecutados desde el servidor central.
+- Reglas de alerta para hosts, checks, CPU, memoria y filesystems.
+- Incidentes con estados `pending`, `firing` y `resolved`, sin duplicar notificaciones.
+- Notificaciones Discord mediante webhooks cifrados y entregas auditables.
+- Enrolamiento de agentes con tokens de un solo uso y credenciales restringidas.
+- Instalación, backup, restore y actualización mediante CLI e instalador `systemd`.
+- Builds reproducibles para Linux `amd64` y `arm64` con `CGO_ENABLED=0`.
+
+## Alcance de la primera release
+
+La primera release está enfocada en un único administrador y despliegues privados
+con Tailscale. Los hosts monitorizados deben ejecutar Linux; el servidor central
+también ejecuta el scheduler, los checks y el evaluador de alertas.
+
+Quedan fuera de este alcance multiusuario, alta disponibilidad, replicación de
+SQLite, acceso público a Internet, OAuth/SSO, agentes Windows o macOS, buffering
+local durante caídas del servidor y un watchdog externo. El primer proveedor de
+notificaciones es Discord.
+
+## Arquitectura
+
+```text
+Navegador dentro de la tailnet
+             |
+             | HTTPS mediante Tailscale Serve
+             v
+      Servidor Atalaya + SQLite
+       |      |       |       |
+       |      |       |       +-- Notificaciones Discord
+       |      |       +---------- Checks HTTP/TCP
+       |      +------------------ Alertas, histórico y retención
+       +------------------------- Pull autenticado de agentes
+                                  |
+                           Agentes Linux remotos
+```
+
+El servidor y cada agente escuchan únicamente en loopback. Tailscale Serve publica
+HTTPS dentro de la tailnet en los puertos 443 y 9474, según el rol instalado.
+
+## Instalación desde una release
+
+Requisitos: Linux con `systemd`, Tailscale instalado y conectado, y `curl` o
+`wget`. El instalador detecta la arquitectura, valida SHA-256 y configura los
+servicios; no instala Tailscale automáticamente.
+
+### Servidor
+
+Descarga una versión concreta, inspecciona el instalador y ejecútalo:
+
+```bash
+ATALAYA_VERSION=v0.1.0
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://github.com/mkrebs03/Atalaya/releases/download/${ATALAYA_VERSION}/install.sh" \
+  --output install.sh
+
+sh -n install.sh
+sudo sh install.sh server --version "$ATALAYA_VERSION"
+```
+
+El rol `server` instala también el agente local. Durante la instalación se crean la
+base de datos, la clave maestra y el administrador inicial; la contraseña se solicita
+interactivamente y no aparece en la línea de comandos.
+
+### Agente remoto
+
+En el host remoto descarga el mismo `install.sh` y ejecuta:
+
+```bash
+sudo sh install.sh agent \
+  --version "$ATALAYA_VERSION" \
+  --server-url https://<servidor> \
+  --display-name "<nombre-del-host>"
+```
+
+Después, crea un token temporal en la vista **Gestionar** del servidor y enrola el
+agente. El token se solicita sin eco; no lo incluyas en argumentos ni en el historial
+del shell:
+
+```bash
+sudo /usr/local/bin/atalaya agent enroll \
+  --config /etc/atalaya/agent.yaml \
+  --display-name "<nombre-del-host>"
+```
+
+La CLI queda instalada en `/usr/local/bin/atalaya`. Los servicios usan esa ruta
+absoluta y se ejecutan como el usuario restringido `atalaya`.
+
+## Operación básica
+
+```bash
+sudo systemctl is-active atalaya-server.service
+sudo systemctl is-active atalaya-agent.service
+curl -fsS http://127.0.0.1:8080/healthz
+curl -fsS http://127.0.0.1:9474/agent/v1/healthz
+sudo /usr/local/bin/atalaya verify --config /etc/atalaya/server.yaml
+```
+
+Los logs se consultan con `journalctl`:
+
+```bash
+sudo journalctl -u atalaya-server.service -u atalaya-agent.service --no-pager
+```
+
+No expongas directamente los puertos loopback ni desactives la validación TLS de
+los agentes. Las ACLs de Tailscale son la frontera de acceso de la instalación.
+
+## Backup y restore
+
+El backup de datos no contiene `master.key`. Exporta la clave maestra por separado y
+custodia ambos archivos mediante mecanismos distintos:
+
+```bash
+sudo install -d -m 0700 /var/backups/atalaya
+sudo /usr/local/bin/atalaya backup \
+  --config /etc/atalaya/server.yaml \
+  --output /var/backups/atalaya/data.tar.gz
+sudo /usr/local/bin/atalaya backup-key \
+  --config /etc/atalaya/server.yaml \
+  --output /var/backups/atalaya/master.key \
+  --yes
+sudo /usr/local/bin/atalaya verify --config /etc/atalaya/server.yaml
+```
+
+La restauración es offline: detener servicios, recuperar datos y clave con permisos
+correctos, ejecutar `migrate`, ejecutar `verify` y arrancar solo después de ambas
+verificaciones. El procedimiento completo y las garantías de seguridad están en
+[`docs/security-and-operations.md`](docs/security-and-operations.md).
+
+## Desarrollo
+
+Requisitos de desarrollo:
 
 - Go `1.26.5`.
 - Node.js `24.18.0`.
 - npm `11.16.0`.
 - GNU Make.
-- Chromium de Playwright, solo para `make test-e2e`.
+- Chromium de Playwright para las pruebas E2E.
 
-Las versiones de Go y Node estan fijadas en [`.tool-versions`](.tool-versions), y npm
-tambien queda fijado en [`web/package.json`](web/package.json). Con un gestor compatible
-con asdf basta ejecutar `asdf install`; en otros entornos instala esas versiones
-exactas antes de usar los comandos del proyecto.
-
-## Verificacion y build
+Las versiones están fijadas en [`.tool-versions`](.tool-versions) y en el lockfile
+de frontend. Con las dependencias instaladas:
 
 ```bash
 make lint
 make test
 make build
-```
-
-`make build` genera:
-
-- `build/atalaya-linux-amd64`
-- `build/atalaya-linux-arm64`
-
-Ambos artefactos se compilan con `CGO_ENABLED=0`; el frontend ya esta incluido y
-Node.js no es necesario en runtime. El build tambien compila la prueba de compatibilidad
-de SQLite, Argon2id y YAML para Linux `amd64` y `arm64`, sin ejecutar el binario de
-prueba cruzado ni dejarlo como artefacto. Para inyectar una version sin agregar
-timestamps:
-
-```bash
-make build VERSION=0.1.0
-```
-
-## Arranque local
-
-Primero prepara una configuracion, una clave raw de exactamente 32 bytes y el directorio
-de datos. Los comandos no generan ni reemplazan la clave maestra:
-
-```bash
-mkdir -p build/dev
-install -m 0600 /dev/null build/dev/master.key
-dd if=/dev/urandom of=build/dev/master.key bs=32 count=1 conv=notrunc status=none
-
-cat > build/dev/server.yaml <<'YAML'
-listen: 127.0.0.1:8080
-mode: development
-public_url: http://127.0.0.1:8080
-database_path: atalaya.db
-master_key_path: master.key
-YAML
-chmod 0600 build/dev/server.yaml
-```
-
-Los paths relativos se resuelven desde el directorio del YAML. Para construir y
-preparar servidor y administrador:
-
-```bash
-make build
-ARCH=amd64 # usa arm64 en Linux aarch64
-./build/atalaya-linux-${ARCH} migrate --config build/dev/server.yaml
-./build/atalaya-linux-${ARCH} admin create --config build/dev/server.yaml
-```
-
-`admin create` exige una terminal interactiva y solicita la password dos veces sin
-eco. El servidor puede arrancar antes de crear el administrador, pero nunca lo crea
-automaticamente.
-
-Para el agente local, prepara los directorios padre y ejecuta bootstrap despues de
-migrar/crear admin. Bootstrap genera `agent.yaml` modo exacto `0640` y credential modo
-exacto `0600`; no instala unidades systemd ni configura Tailscale:
-
-```bash
-./build/atalaya-linux-${ARCH} bootstrap local-agent \
-  --server-config build/dev/server.yaml \
-  --agent-config build/dev/agent.yaml \
-  --agent-url https://oracle.example.ts.net:9474
-```
-
-El YAML generado contiene exactamente estas claves; paths relativos se resuelven
-desde su directorio:
-
-```yaml
-listen: 127.0.0.1:9474
-server_url: http://127.0.0.1:8080
-advertised_url: https://oracle.example.ts.net:9474
-credential_path: agent-credential
-```
-
-`server_url` se deriva del `public_url` del server config y `advertised_url` reproduce
-el `--agent-url` validado. Configura manualmente Tailscale Serve para publicar el
-listener 9474, inicia primero agente y despues inicia o reinicia servidor, en terminales
-separadas:
-
-```bash
-./build/atalaya-linux-${ARCH} agent --config build/dev/agent.yaml
-./build/atalaya-linux-${ARCH} server --config build/dev/server.yaml
-```
-
-Finalmente valida salud del servidor, salud del agente y que Oracle aparezca en la UI
-autenticada:
-
-```bash
-curl -i http://127.0.0.1:8080/healthz
-curl -i http://127.0.0.1:9474/agent/v1/healthz
-```
-
-Para trabajar con hot reload, usa una copia del YAML con
-`public_url: http://127.0.0.1:5173`, ejecuta `make dev-server CONFIG=<esa-copia>` y
-`make web-dev` en terminales separadas. Vite queda en `http://127.0.0.1:5173` y envia
-`/api` y `/healthz` al servidor Go en `127.0.0.1:8080`.
-
-El listener HTTP de Go siempre debe ser loopback (`localhost`, `127.0.0.1` o `::1`) en
-todos los modos; Tailscale Serve publica HTTPS sin abrir el proceso a otra interfaz.
-Produccion exige un origen `https://`. El modo `development` solo acepta un origen
-HTTP si tambien es loopback. `public_url` representa un origen estricto: no admite
-usuario, path, delimitadores de query o fragmento aunque esten vacios, ni puerto
-explicito vacio. Los errores de parseo no reproducen el valor recibido.
-
-### Enrolar un agente remoto
-
-Desde la UI autenticada, crea un token en Gestionar y guárdalo temporalmente en un
-archivo modo `0600`. En el host remoto, con un `agent.yaml` válido, ejecuta el
-enrolamiento como el usuario del servicio para que la credencial quede legible por
-`atalaya-agent.service`:
-
-```bash
-sudo -u atalaya -- /usr/local/bin/atalaya agent enroll --config /etc/atalaya/agent.yaml
-```
-
-El comando solicita el token por prompt. Si se usa `--token-file`, el archivo debe ser
-`0600` y legible por `atalaya`; se elimina después de leerlo. El enrolamiento guarda un
-estado lateral 0600 para repetir de forma segura una respuesta perdida y escribe la
-credencial sin reemplazar una credencial válida existente. Si el comando se ejecuta
-como root, el instalador hace un handoff controlado al propietario del directorio de
-estado.
-
-## Pruebas end-to-end
-
-Instala primero las dependencias fijadas y Chromium, y luego ejecuta el flujo:
-
-```bash
 make install-e2e-browser
 make test-e2e
 ```
 
-Los targets usan un stamp dependiente de `package.json`, el lockfile y
-`.tool-versions`, por lo que `npm ci` se repite solo cuando cambia una de esas entradas
-o falta `node_modules`. Playwright siempre arranca el binario Go host recien construido
-desde `build/atalaya`; no reutiliza otro servidor ni usa Vite Preview. Cada ejecucion
-crea config, clave `0600` y DB aisladas bajo `build/e2e`.
+`make build` genera `build/atalaya-linux-amd64` y
+`build/atalaya-linux-arm64`. Para desarrollo interactivo, `make dev-server` y
+`make web-dev` levantan el backend y Vite en terminales separadas.
 
-## CLI implementada hasta Fase 6
+## Documentación
 
-`atalaya version` y las ayudas terminan con codigo `0`. Los comandos de operacion terminan con `1`. Tambien usan `1` una
-clave o DB invalida, un fallo de terminal, passwords no coincidentes o un administrador
-activo ya existente. Uso, argumentos, YAML o valores de configuracion invalidos,
-incluidos comando ausente o desconocido, terminan con `2`.
+- [Especificación del producto](spec.md): alcance, comportamiento y limitaciones.
+- [Arquitectura](docs/architecture.md): componentes, flujos y límites.
+- [API y protocolos](docs/api.md): contratos entre UI, servidor y agentes.
+- [Modelo de dominio](docs/domain-model.md): entidades, estados y persistencia.
+- [Seguridad y operación](docs/security-and-operations.md): despliegue, red, secretos,
+  backup y actualización.
+- [Dependencias](docs/dependencies.md): dependencias directas y licencias.
+- [Roadmap](docs/roadmap.md): alcance de release y trabajo posterior.
+- [Contribuir](CONTRIBUTING.md): entorno, estándares y verificación.
+- [Seguridad](SECURITY.md): reporte privado de vulnerabilidades.
+- [Licencia](LICENSE): Apache License 2.0.
 
-Comandos implementados:
+## Licencia
 
-```text
-atalaya server [--config <path>]
-atalaya migrate [--config <path>]
-atalaya admin create [--config <path>] [--username <name>]
-atalaya admin reset-password [--config <path>]
-atalaya agent --config <path>
-atalaya agent enroll --config <path> [--display-name <name>] [--token-file <path>]
-atalaya bootstrap local-agent --server-config <path> --agent-config <path> \
-  --agent-url <url> [--display-name <name>] [--listen <addr>] \
-  [--credential-path <path>]
-atalaya backup --config <path> --output <path>
-atalaya backup-key --config <path> --output <path> [--yes]
-atalaya verify --config <path>
-atalaya tailscale serve
-```
+Atalaya se distribuye bajo [Apache License 2.0](LICENSE). El código de terceros
+conserva sus propias licencias; consulta el [registro de dependencias](docs/dependencies.md)
+para las dependencias directas.
 
-Solo `server`, `migrate` y los subcomandos `admin` comparten server config con default
-`/etc/atalaya/server.yaml`. `agent --config` exige path explicito y no tiene default.
-Bootstrap exige `--server-config`, `--agent-config` y `--agent-url`; si se omiten sus
-flags opcionales usa display name `Oracle`, listener `127.0.0.1:9474` y credential path
-junto al agent config. No existen overrides por variables de entorno.
+## Seguridad
 
-La UI autenticada permite gestionar tokens, cadencias, estado administrativo y
-filesystems de hosts, checks HTTP/TCP, reglas de alerta, incidentes, canales Discord y
-entregas. Consulta el [plan de implementacion](docs/implementation-plan.md) para el
-alcance y las condiciones de salida.
-
-## Instalacion y operacion en Linux
-
-El instalador publico se obtiene desde GitHub Releases y valida SHA-256 antes de
-instalar el binario. Requiere Linux con systemd y una conexion Tailscale activa; no
-instala esas dependencias silenciosamente.
-
-Instalacion del servidor:
-
-```bash
-curl -fsSL https://github.com/mkrebs03/atalaya/releases/latest/download/install.sh | \
-  sudo sh -s -- server
-```
-
-Instalacion del agente:
-
-```bash
-sudo sh install.sh agent --server-url https://<tailnet-hostname>
-```
-
-Para una release privada u offline usa --artifact-dir con el directorio que contiene
-el binario y SHA256SUMS. --no-start instala archivos y units sin migrar ni iniciar
-servicios. Las operaciones disponibles son:
-
-```bash
-atalaya backup --config /etc/atalaya/server.yaml --output /var/backups/atalaya.tar.gz
-atalaya backup-key --config /etc/atalaya/server.yaml --output /var/backups/master.key --yes
-atalaya verify --config /etc/atalaya/server.yaml
-```
-
-La restauracion offline es controlada: extrae el backup, instala con --no-start,
-ejecuta migrate y verify, y arranca solo despues de ambas verificaciones. Upgrade
-crea un backup pre-migracion y conserva rollback de binario y base de datos hasta que
-los healthchecks del servidor y agente terminan correctamente.
+Atalaya está diseñado para redes privadas y no debe exponerse directamente a Internet.
+No incluyas contraseñas, tokens, webhooks ni claves maestras en issues, logs o commits.
+Si encuentras una vulnerabilidad, evita publicar detalles explotables hasta coordinar
+una corrección con los mantenedores.

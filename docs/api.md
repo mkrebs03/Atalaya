@@ -111,8 +111,8 @@ Usado por agente, no navegador. Request incluye:
 {
   "enrollment_token": "one-time-secret",
   "request_id": "agent-generated-id",
-  "display_name": "oracle-vm",
-  "agent_url": "https://oracle-vm.tailnet-name.ts.net:9474",
+  "display_name": "agent-1",
+  "agent_url": "https://agent-1.tailnet-name.ts.net:9474",
   "agent_version": "semver",
   "protocol_version": 1
 }
@@ -179,7 +179,7 @@ enrolamiento usan `revoked_at` y no el ciclo de archivado.
 - `GET /api/v1/enrollment-tokens`
 - `DELETE /api/v1/enrollment-tokens/{id}`
 
-Fase 2A implementa los endpoints read-only; Fase 2B agrega enrolamiento y mutaciones.
+Los endpoints read-only se complementan con enrolamiento y mutaciones administrativas.
 Todos exigen sesion salvo el endpoint de enrolamiento. `limit` tiene default 50 y maximo
 100; `cursor` es opaco. Limit/cursor invalido responde 400
 `validation_failed` con `fields`, sesion ausente o invalida responde 401
@@ -197,7 +197,7 @@ primera pagina para obtener una vista nueva.
 ```json
 {
   "items": [{
-    "id": "opaque-id", "display_name": "Oracle",
+    "id": "opaque-id", "display_name": "agent-1",
     "administrative_state": "pending", "observed_state": "unknown", "stale": false,
     "last_attempt_at": null, "last_success_received_at": null,
     "freshness_deadline_at": null, "consecutive_failures": 0,
@@ -232,7 +232,7 @@ si coincide responde 304 sin body y conserva `no-store`.
 
 ```json
 {
-  "id":"opaque-id", "display_name":"Oracle", "administrative_state":"active",
+  "id":"opaque-id", "display_name":"agent-1", "administrative_state":"active",
   "observed_state":"degraded", "stale":false,
   "last_attempt_at":"2026-07-17T12:00:00Z",
   "last_success_received_at":"2026-07-17T12:00:00Z",
@@ -240,15 +240,15 @@ si coincide responde 304 sin body y conserva `no-store`.
   "interval_seconds":60, "timeout_seconds":10,
   "cpu_used_percent":12.5, "memory_used_bytes":1024, "memory_total_bytes":4096,
   "uptime_seconds":12345,
-  "tailscale":{"state":"connected","hostname":"oracle-vm.tailnet.ts.net","addresses":["100.64.0.1"]},
+  "tailscale":{"state":"connected","hostname":"agent-1.tailnet.ts.net","addresses":["100.64.0.1"]},
   "warnings":["clock_skew"], "agent_version":"dev", "protocol_version":1,
   "most_constrained_filesystem":null, "archived":false,
-  "agent_url":"https://oracle-vm.tailnet.ts.net:9474",
+  "agent_url":"https://agent-1.tailnet.ts.net:9474",
   "snapshot":{
     "received_at":"2026-07-17T12:00:00Z", "observed_at":"2026-07-17T11:50:00Z",
-    "hostname":"oracle-vm", "boot_id":"opaque-linux-boot-id", "uptime_seconds":12345,
+    "hostname":"agent-1", "boot_id":"opaque-linux-boot-id", "uptime_seconds":12345,
     "cpu_used_percent":12.5, "memory_used_bytes":1024, "memory_total_bytes":4096,
-    "tailscale":{"state":"connected","hostname":"oracle-vm.tailnet.ts.net","addresses":["100.64.0.1"]},
+    "tailscale":{"state":"connected","hostname":"agent-1.tailnet.ts.net","addresses":["100.64.0.1"]},
     "collection_warnings":[]
   },
   "version":1
@@ -587,7 +587,7 @@ otro destino se rechaza con `422`. Lecturas devuelven:
 ```json
 {
   "id": "opaque-id",
-  "name": "Personal Discord",
+  "name": "Discord notifications",
   "provider": "discord",
   "secret_configured": true,
   "enabled": true
@@ -702,7 +702,7 @@ Contrato JSON normativo exacto:
   "protocol_version": 1,
   "agent_version": "dev",
   "host": {
-    "hostname": "oracle-vm",
+    "hostname": "agent-1",
     "observed_at": "2026-07-15T12:00:00Z",
     "boot_id": "opaque-linux-boot-id",
     "uptime_seconds": 12345,
@@ -712,7 +712,7 @@ Contrato JSON normativo exacto:
   },
   "tailscale": {
     "state": "connected",
-    "hostname": "oracle-vm",
+    "hostname": "agent-1",
     "addresses": ["100.64.0.1"]
   },
   "collection_warnings": [],
@@ -789,8 +789,8 @@ absolutos se conservan byte por byte.
 CPU se calcula en agente desde dos lecturas de `/proc/stat` separadas por 250 ms:
 `100 * (delta_total - delta_idle - delta_iowait) / delta_total`. Memoria usada es
 `MemTotal - MemAvailable`. Si contador no avanza o campos no existen, valor JSON es
-`null`; servidor conserva el campo actual pero Fase 2A no crea `MetricSample`. Totales
-y usados de memoria tambien pueden ser `null` como par.
+`null`; el servidor conserva el campo actual cuando no existe una muestra histórica.
+Totales y usados de memoria también pueden ser `null` como par.
 
 `observed_at` es diagnostico reportado por agente. Servidor agrega `received_at` al
 persistir; orden de series y evaluaciones usan ese timestamp, evitando depender del

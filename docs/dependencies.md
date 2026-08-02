@@ -15,7 +15,7 @@ de distribuir una release se genera el aviso de terceros completo desde esos loc
 | `vue-router` | `5.2.0` | Navegacion de UI | MIT |
 
 SQLite, Argon2id y YAML respaldan la persistencia, los hashes de password y la
-configuracion estricta de Fase 1A. La prueba de compatibilidad fundacional continua
+configuración estricta. La prueba de compatibilidad fundacional continúa
 abriendo SQLite en memoria, derivando una clave Argon2id y verificando con
 `CGO_ENABLED=0` que el decoder YAML con `KnownFields(true)` rechace campos
 desconocidos. `x/sys` respalda el cargador Linux de clave maestra y la restauracion

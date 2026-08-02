@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Atalaya has a Phase 0 bootstrap implementation. Treat `spec.md` as the product
+Atalaya is preparing its first public release. Treat `spec.md` as the product
 contract and `docs/README.md` as the technical document index and precedence list.
 Current technical docs live under `docs/`.
 
@@ -11,23 +11,22 @@ Implementation structure is:
 - `cmd/atalaya/`: Go CLI entrypoint.
 - `internal/`: Go modules added as vertical slices require them.
 - `web/`: Vue 3, TypeScript, and Vite frontend.
-- `scripts/`: install, release, and operational helper scripts when later phases need
-  them.
-- `docs/`: architecture, API, domain model, security, and implementation plan.
+- `scripts/`: installation, release, and operational helper scripts.
+- `docs/`: architecture, API, domain model, security, and release roadmap.
 
 Do not create empty packages ahead of use; add modules when a vertical slice needs
 them.
 
 ## Build, Test, and Development Commands
 
-Phase 0 must establish stable commands:
+The repository must keep these stable commands:
 
 - `make test`: run Go and frontend tests.
 - `make lint`: run formatting, linting, and static checks.
 - `make build`: build the Linux `amd64`/`arm64` deliverables.
 - `make test-e2e`: run end-to-end checks once UI workflows exist.
 
-Keep command behavior and references aligned with `docs/implementation-plan.md` and
+Keep command behavior and references aligned with `docs/roadmap.md` and
 the root `README.md`.
 
 ## Coding Style & Naming Conventions
