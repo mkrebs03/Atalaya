@@ -43,17 +43,86 @@ curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.
 Después, crea un token temporal en **Gestionar** en el servidor y enrola el agente:
 
 ```bash
-sudo /usr/local/bin/atalaya agent enroll \
+sudo atalaya agent enroll \
   --config /etc/atalaya/agent.yaml \
   --display-name "<nombre-del-host>"
 ```
 
 El token se solicita sin eco. No lo incluyas en argumentos, variables persistentes ni
-en el historial del shell. La CLI queda instalada en `/usr/local/bin/atalaya` y los
-servicios se ejecutan como el usuario restringido `atalaya`.
+en el historial del shell. Los servicios se ejecutan como el usuario restringido
+`atalaya`.
 
 Para usar una versión fijada, el canal `dev`, actualizar, verificar, consultar logs o
 hacer backup/restore, sigue la [guía de seguridad y operación](docs/security-and-operations.md).
+
+### Compatibilidad del comando
+
+La CLI se instala en `/usr/local/bin/atalaya`, la ubicación habitual para software
+instalado localmente. En una instalación estándar puedes ejecutarla como `atalaya`.
+El instalador no modifica el `PATH` global ni la configuración de `sudo`.
+
+Si `atalaya` no aparece después de instalar, comprueba qué entorno no incluye
+`/usr/local/bin`:
+
+```bash
+command -v atalaya
+sudo sh -c 'command -v atalaya'
+```
+
+En ese caso, añade `/usr/local/bin` al `PATH` de ese entorno siguiendo la configuración
+recomendada por tu distribución. El proyecto todavía no publica una matriz de
+distribuciones con ese comportamiento verificado; por ahora el instalador requiere
+Linux con `systemd`, Tailscale conectado y `curl` o `wget`.
+
+## Referencia de la CLI
+
+Ejecuta `atalaya help` o `atalaya help <comando>` para consultar la ayuda integrada.
+Los comandos de larga ejecución (`server` y `agent`) normalmente son gestionados por
+`systemd` después de la instalación.
+
+### Operación y enrolamiento
+
+| Comando | Para qué sirve |
+| --- | --- |
+| `atalaya server` | Inicia el servidor web, la recolección, los checks y las notificaciones. |
+| `atalaya agent` | Inicia el agente Linux que expone métricas al servidor. |
+| `atalaya agent enroll` | Enrola un agente remoto con un token temporal. |
+
+`server` usa `/etc/atalaya/server.yaml` por defecto. `agent enroll` requiere indicar
+`--config` y permite cambiar el nombre mostrado con `--display-name`.
+
+### Administración y mantenimiento
+
+| Comando | Para qué sirve |
+| --- | --- |
+| `atalaya admin create` | Crea el administrador inicial. |
+| `atalaya admin reset-password` | Cambia la contraseña y revoca las sesiones activas. |
+| `atalaya migrate` | Aplica las migraciones de la base de datos sin iniciar el servidor. |
+| `atalaya verify` | Comprueba configuración, esquema, base de datos y secretos cifrados. |
+| `atalaya backup --output <path>` | Crea un backup consistente de datos sin incluir la clave maestra. |
+| `atalaya backup-key --output <path>` | Exporta la clave maestra por separado para completar un backup. |
+
+Los comandos de administración y mantenimiento aceptan `--config <path>`; para el
+servidor el valor predeterminado es `/etc/atalaya/server.yaml`. Los archivos de backup
+y la clave maestra deben custodiarse por separado.
+
+### Configuración avanzada
+
+| Comando | Para qué sirve |
+| --- | --- |
+| `atalaya bootstrap local-agent` | Crea o verifica la configuración y credencial del agente local. El instalador lo ejecuta automáticamente. |
+| `atalaya tailscale serve` | Configura y verifica las rutas privadas de Tailscale Serve. |
+
+Estos comandos se usan principalmente durante la instalación, recuperación o diagnóstico.
+`tailscale serve` permite seleccionar el rol con `--role both`, `--role server` o
+`--role agent`.
+
+### Información
+
+| Comando | Para qué sirve |
+| --- | --- |
+| `atalaya version` | Muestra la versión instalada. |
+| `atalaya help` | Muestra la ayuda general o la ayuda de un comando específico. |
 
 ## Qué incluye
 
