@@ -11,14 +11,16 @@ on:
       - completed
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-please:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -26,7 +28,7 @@ jobs:
     steps:
       - name: Create or update release PR
         id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           token: ${{ secrets.ATALAYA_RELEASE_TOKEN }}
           config-file: release-please-config.json
@@ -37,6 +39,8 @@ jobs:
     needs: release-please
     name: Tailscale Serve compatibility (${{ matrix.version }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -44,10 +48,10 @@ jobs:
         # range. The adapter's semver matrix covers versions between them.
         version: ["1.52.0", "1.99.0"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs['release-please'].outputs.tag_name }}
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: .tool-versions
           cache-dependency-path: go.sum
@@ -77,19 +81,22 @@ jobs:
       - release-please
       - tailscale-compatibility
     runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ secrets.ATALAYA_RELEASE_TOKEN }}
       RELEASE_TAG: ${{ needs['release-please'].outputs.tag_name }}
       RELEASE_VERSION: ${{ needs['release-please'].outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs['release-please'].outputs.tag_name }}
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: .tool-versions
           cache-dependency-path: go.sum
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .tool-versions
           cache: npm
@@ -131,8 +138,11 @@ jobs:
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     concurrency:
       group: atalaya-dev-release
       cancel-in-progress: false
@@ -141,15 +151,15 @@ jobs:
       CI_SHA: ${{ github.event.workflow_run.head_sha }}
       CI_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: .tool-versions
           cache-dependency-path: go.sum
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .tool-versions
           cache: npm
