@@ -52,8 +52,21 @@ El token se solicita sin eco. No lo incluyas en argumentos, variables persistent
 en el historial del shell. Los servicios se ejecutan como el usuario restringido
 `atalaya`.
 
-Para usar una versión fijada, el canal `dev`, actualizar, verificar, consultar logs o
-hacer backup/restore, sigue la [guía de seguridad y operación](docs/security-and-operations.md).
+### Actualizar una instalación existente
+
+Si ya tienes una instalación `server`, actualízala sin borrar la configuración ni los
+datos:
+
+```bash
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh \
+  | sudo sh -s -- upgrade
+```
+
+El instalador crea un backup previo, aplica las migraciones, verifica el resultado y
+revierte el cambio si la actualización falla.
+
+Para usar una versión fijada, el canal `dev`, verificar, consultar logs o hacer
+backup/restore, sigue la [guía de seguridad y operación](docs/security-and-operations.md).
 
 ### Compatibilidad del comando
 

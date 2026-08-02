@@ -67,7 +67,15 @@ aprobarla y fusionarla se generarán el tag `v0.0.1` y sus artefactos estables.
 Para instalar el estado dev más reciente:
 
 ```bash
-sudo sh install.sh server --channel dev
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+  | sudo sh -s -- server --channel dev
+```
+
+Para actualizar una instalación existente al estado dev más reciente:
+
+```bash
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+  | sudo sh -s -- upgrade --channel dev
 ```
 
 No reutilices tags `vX.Y.Z` ni edites manualmente una release estable; el único

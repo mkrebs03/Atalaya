@@ -287,10 +287,9 @@ curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.
   | sudo sh -s -- server
 ```
 
-El instalador detecta la terminal de control aunque su `stdin` reciba el script por
-pipe, y usa esa terminal para solicitar la contraseña del administrador. Si no existe
-una terminal disponible, completa la instalación pero muestra el comando local para
-crear el administrador después.
+Durante la instalación del servidor, el instalador solicita la contraseña del
+administrador en la terminal. Si no hay una terminal interactiva disponible, completa
+la instalación y muestra el comando para crear el administrador después.
 
 El mismo patrón sirve para un agente remoto:
 
@@ -299,10 +298,12 @@ curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.
   | sudo sh -s -- agent --server-url https://<servidor>.ts.net
 ```
 
-### Instalacion auditable
+### Instalacion auditable (opcional)
 
-Requiere Linux con `systemd`, Tailscale instalado, autenticado y conectado, y
-`curl` o `wget`. El instalador no instala Tailscale ni abre un listener publico.
+Si necesitas revisar el script antes de ejecutarlo, puedes descargarlo, comprobar su
+sintaxis y ejecutarlo por separado. Este flujo requiere Linux con `systemd`, Tailscale
+instalado, autenticado y conectado, y `curl` o `wget`. El instalador no instala
+Tailscale ni abre un listener publico.
 
 Para instalar el servidor con la ultima release estable:
 
@@ -374,17 +375,15 @@ sobre `main`. Es util para probar el estado integrado mas reciente, pero no tien
 compatibilidad hacia adelante ni debe usarse con datos de produccion.
 
 ```bash
-curl --fail --location --proto '=https' --proto-redir '=https' \
-  "https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh" \
-  --output install.sh
-sh -n install.sh
-sudo sh install.sh server --channel dev
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+  | sudo sh -s -- server --channel dev
 ```
 
 Para actualizar una instalacion existente con el mismo canal:
 
 ```bash
-sudo sh install.sh upgrade --channel dev
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+  | sudo sh -s -- upgrade --channel dev
 ```
 
 `--channel dev` no se combina con `--version`. Para una instalacion estable, omite
@@ -392,19 +391,18 @@ sudo sh install.sh upgrade --channel dev
 
 ### Actualizacion
 
-Para actualizar a la ultima release estable, descarga e inspecciona el instalador y
-ejecuta `upgrade`:
+Para actualizar a la ultima release estable sin guardar el instalador en el host,
+ejecuta `upgrade` directamente:
 
 ```bash
-curl --fail --location --proto '=https' --proto-redir '=https' \
-  "https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh" \
-  --output install.sh
-sh -n install.sh
-sudo sh install.sh upgrade
+curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.sh \
+  | sudo sh -s -- upgrade
 ```
 
-Para el canal `dev`, usa el instalador descargado desde `/releases/download/dev/` y
-añade `--channel dev`, como en el procedimiento anterior.
+Para actualizar una instalación del canal `dev`, usa el instalador del release rolling
+y añade `--channel dev`, como en el procedimiento anterior. Si necesitas revisar el
+script antes de actualizar, utiliza la [instalación auditable](#instalacion-auditable-opcional)
+y pasa `upgrade` al ejecutarlo.
 
 El upgrade detiene los servicios, crea un backup local previo a la migracion, instala
 el binario y las units, ejecuta `migrate` y `verify`, comprueba salud y conserva un
@@ -475,8 +473,9 @@ La restauracion es un procedimiento documentado: detener servicio, restaurar DB,
 y config, comprobar integridad, ejecutar `atalaya migrate`, ejecutar `atalaya verify` y
 solo entonces arrancar una version compatible.
 
-Comando `curl | sh` puede ofrecer conveniencia, pero documentacion tambien debe mostrar
-descarga, inspeccion y ejecucion separadas.
+El flujo rápido usa `curl | sh` para evitar archivos temporales en el host. La
+instalación auditable permanece disponible cuando se necesita revisar el script antes
+de ejecutarlo.
 
 ## 10. Logs y diagnostico
 
