@@ -6,6 +6,7 @@ set -eu
 
 ROLE=
 VERSION=
+CHANNEL=
 ARTIFACT_DIR=
 BASE_URL="https://github.com/mkrebs03/atalaya/releases"
 NO_START=0
@@ -18,7 +19,8 @@ usage() {
 Usage: install.sh <server|agent|upgrade> [options]
 
 Options:
-  --version <version>       Release version, for example v0.1.0
+  --version <version>       Release version, for example v0.0.1
+  --channel <channel>       Release channel, currently stable or dev
   --artifact-dir <path>     Offline directory containing binary and SHA256SUMS
   --base-url <url>          Release base URL
   --server-url <url>        Server origin for a new agent.yaml
@@ -47,6 +49,15 @@ while [ "$#" -gt 0 ]; do
       ;;
     --version=*)
       VERSION=${1#--version=}
+      shift
+      ;;
+    --channel)
+      [ "$#" -ge 2 ] || die "--channel requires a value"
+      CHANNEL=$2
+      shift 2
+      ;;
+    --channel=*)
+      CHANNEL=${1#--channel=}
       shift
       ;;
     --artifact-dir)
@@ -97,6 +108,17 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$ROLE" ] || { usage >&2; exit 2; }
+case "$CHANNEL" in
+  ""|stable|dev) ;;
+  *) die "unsupported channel $CHANNEL" ;;
+esac
+if [ "$VERSION" = dev ] && [ "$CHANNEL" != dev ]; then
+  die "--version dev requires --channel dev"
+fi
+if [ "$CHANNEL" = dev ]; then
+  [ -z "$VERSION" ] || die "--channel dev and --version cannot be combined"
+  VERSION=dev
+fi
 [ "$(uname -s)" = Linux ] || die "Linux with systemd is required"
 case "$(uname -m)" in
   x86_64|amd64) ARCH=amd64 ;;
@@ -165,6 +187,8 @@ else
   RELEASE_ROOT=$(printf '%s\n' "$BASE_URL" | sed 's|/download$||')
   if [ "$VERSION" = latest ]; then
     RELEASE_URL="$RELEASE_ROOT/latest/download"
+  elif [ "$VERSION" = dev ]; then
+    RELEASE_URL="$RELEASE_ROOT/download/dev"
   else
     case "$VERSION" in
       v*) TAG=$VERSION ;;

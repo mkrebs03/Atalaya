@@ -40,3 +40,35 @@ enrolamiento, almacenamiento de credenciales, migraciones o validación SSRF seg
 
 Los pull requests deben explicar el alcance, listar los comandos de verificación y
 adjuntar capturas cuando modifiquen la interfaz.
+
+## Releases
+
+Atalaya usa dos canales:
+
+- `stable`: una Release PR aprobada calcula la siguiente versión SemVer, actualiza
+  `CHANGELOG.md` y publica una release inmutable para usuarios finales.
+- `dev`: CI actualiza la release rolling `dev` después de cada push exitoso a `main`.
+  Sirve para probar el último estado integrado y no debe usarse en producción.
+
+Los mensajes Conventional Commits determinan el siguiente incremento: `fix` aumenta
+patch, `feat` aumenta minor y un cambio incompatible llega a `1.0.0`. Una excepción
+explícita puede incluir el footer `Release-As: x.y.z` en el commit que debe iniciar la
+Release PR. La primera release se inicializa como `0.0.1` mediante ese mecanismo.
+
+El workflow necesita el secret de Actions `ATALAYA_RELEASE_TOKEN`, con permisos para
+crear PRs, tags, releases y actualizar `CHANGELOG.md`. Debe ser un token de
+automatización dedicado; además, el repositorio debe permitir que Actions cree y
+apruebe pull requests.
+
+Para inicializar la primera release, agrega una sola vez el footer `Release-As: 0.0.1`
+en un commit de `main`. Release Please abrirá la Release PR correspondiente; al
+aprobarla y fusionarla se generarán el tag `v0.0.1` y sus artefactos estables.
+
+Para instalar el estado dev más reciente:
+
+```bash
+sudo sh install.sh server --channel dev
+```
+
+No reutilices tags `vX.Y.Z` ni edites manualmente una release estable; el único
+puntero mutable es `dev`.

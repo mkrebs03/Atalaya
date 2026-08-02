@@ -7,7 +7,9 @@ GO_PACKAGES := ./cmd/... ./internal/... ./web
 WEB_DEPS_STAMP := web/node_modules/.atalaya-dependencies
 LDFLAGS := -s -w -X github.com/mkrebs03/atalaya/internal/buildinfo.Version=$(VERSION)
 
-.PHONY: test lint build test-e2e verify-cross-deps verify-install install-e2e-browser dev-server web-dev
+.PHONY: test lint build package-release test-e2e verify-cross-deps verify-install install-e2e-browser dev-server web-dev
+
+PACKAGE_DIR ?= build/release
 
 $(WEB_DEPS_STAMP): web/package.json web/package-lock.json .tool-versions
 	cd web && $(NPM) ci
@@ -33,6 +35,7 @@ lint: $(WEB_DEPS_STAMP)
 
 verify-install:
 	sh -n scripts/install.sh
+	if [ "$(shell uname -s)" = Linux ]; then sh scripts/install_test.sh; fi
 	if command -v systemd-analyze >/dev/null 2>&1; then systemd-analyze verify scripts/systemd/atalaya-server.service scripts/systemd/atalaya-agent.service; fi
 
 build: $(WEB_DEPS_STAMP) verify-cross-deps
@@ -40,6 +43,13 @@ build: $(WEB_DEPS_STAMP) verify-cross-deps
 	mkdir -p build
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o build/atalaya-linux-amd64 ./cmd/atalaya
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o build/atalaya-linux-arm64 ./cmd/atalaya
+
+package-release: build
+	mkdir -p "$(PACKAGE_DIR)"
+	cp build/atalaya-linux-amd64 build/atalaya-linux-arm64 "$(PACKAGE_DIR)/"
+	cp scripts/install.sh "$(PACKAGE_DIR)/install.sh"
+	chmod 0755 "$(PACKAGE_DIR)/install.sh"
+	cd "$(PACKAGE_DIR)" && sha256sum atalaya-linux-amd64 atalaya-linux-arm64 install.sh > SHA256SUMS
 
 test-e2e: $(WEB_DEPS_STAMP)
 	cd web && $(NPM) run build

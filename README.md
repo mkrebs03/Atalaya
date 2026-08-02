@@ -65,7 +65,7 @@ servicios; no instala Tailscale automáticamente.
 Descarga una versión concreta, inspecciona el instalador y ejecútalo:
 
 ```bash
-ATALAYA_VERSION=v0.1.0
+ATALAYA_VERSION=v0.0.1
 curl --fail --location --proto '=https' --proto-redir '=https' \
   "https://github.com/mkrebs03/Atalaya/releases/download/${ATALAYA_VERSION}/install.sh" \
   --output install.sh
@@ -101,6 +101,32 @@ sudo /usr/local/bin/atalaya agent enroll \
 
 La CLI queda instalada en `/usr/local/bin/atalaya`. Los servicios usan esa ruta
 absoluta y se ejecutan como el usuario restringido `atalaya`.
+
+### Canal rolling de desarrollo
+
+El canal `dev` se actualiza automáticamente después de cada CI exitoso sobre `main`.
+Es útil para probar el estado integrado más reciente, pero es inestable y no debe
+usarse con datos de producción. Sus artefactos y el tag `dev` pueden cambiar.
+
+Descarga el instalador del canal y ejecuta:
+
+```bash
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh" \
+  --output install.sh
+
+sh -n install.sh
+sudo sh install.sh server --channel dev
+```
+
+Para actualizar una instalación existente:
+
+```bash
+sudo sh install.sh upgrade --channel dev
+```
+
+`--channel dev` no se combina con `--version`. Las releases oficiales siguen usando
+tags estables inmutables y `--version` explícita.
 
 ## Operación básica
 
@@ -167,6 +193,9 @@ make test-e2e
 `make build` genera `build/atalaya-linux-amd64` y
 `build/atalaya-linux-arm64`. Para desarrollo interactivo, `make dev-server` y
 `make web-dev` levantan el backend y Vite en terminales separadas.
+
+`make package-release VERSION=0.0.1` genera los dos binarios, `install.sh` y
+`SHA256SUMS` en `build/release/`, igual que el empaquetado de GitHub Actions.
 
 ## Documentación
 
