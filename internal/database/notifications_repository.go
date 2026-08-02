@@ -85,7 +85,7 @@ func (database *Database) UpdateChannel(ctx context.Context, id string, version 
 	} else if err != nil {
 		return err
 	}
-	if currentVersion != int(version) {
+	if int64(currentVersion) != version {
 		return notifications.ErrVersionConflict
 	}
 	if archived.Valid {
