@@ -133,7 +133,7 @@ printf '%s\n' piped-input | env \\
     --base-url 'file://$RELEASE_ROOT'
 EOF
   chmod 0755 "$PIPE_DRIVER"
-  if script -q /dev/null "$PIPE_DRIVER" >/dev/null 2>&1; then
+  if script -q -c "$PIPE_DRIVER" /dev/null >/dev/null 2>&1; then
     test -f "$PIPE_MARKER"
   else
     printf '%s\n' "piped server installation failed" >&2
