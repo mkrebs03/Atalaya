@@ -181,9 +181,10 @@ El binario sigue siendo unico: server y agent comparten ejecutable, pero cada un
 recibe su YAML. El estado operativo autenticado se calcula desde SQLite sin agregar
 tablas ni una migracion nueva. La release de GitHub contiene ambos binarios Linux,
 SHA256SUMS, el instalador y las notas de la matriz Tailscale. El canal `stable` usa
-tags inmutables y una Release PR aprobada; el canal `dev` usa un tag rolling mutable
-actualizado por el workflow posterior a CI. Ambos reutilizan el mismo target de
-empaquetado y la version del build queda embebida en el binario.
+tags inmutables y una Release PR aprobada; el canal `dev` publica una release
+inmutable historica por cada CI exitoso y el instalador resuelve el tag `dev-*` mas
+reciente. Ambos reutilizan el mismo target de empaquetado y la version del build queda
+embebida en el binario.
 
 ## 5. Flujo de enrolamiento
 

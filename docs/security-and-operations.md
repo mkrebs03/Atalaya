@@ -370,19 +370,20 @@ la version de un upgrade.
 
 ### Canal `dev`
 
-El canal `dev` es una release rolling publica, reemplazada despues de cada CI exitoso
-sobre `main`. Es util para probar el estado integrado mas reciente, pero no tiene
-compatibilidad hacia adelante ni debe usarse con datos de produccion.
+El canal `dev` es un conjunto de releases publicas historicas, actualizado despues de
+cada CI exitoso sobre `main`. El instalador selecciona automaticamente el build mas
+reciente; es util para probar el estado integrado, pero no tiene compatibilidad hacia
+adelante ni debe usarse con datos de produccion.
 
 ```bash
-curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+curl -fsSL https://raw.githubusercontent.com/mkrebs03/Atalaya/main/scripts/install.sh \
   | sudo sh -s -- server --channel dev
 ```
 
 Para actualizar una instalacion existente con el mismo canal:
 
 ```bash
-curl -fsSL https://github.com/mkrebs03/Atalaya/releases/download/dev/install.sh \
+curl -fsSL https://raw.githubusercontent.com/mkrebs03/Atalaya/main/scripts/install.sh \
   | sudo sh -s -- upgrade --channel dev
 ```
 
@@ -399,10 +400,12 @@ curl -fsSL https://github.com/mkrebs03/Atalaya/releases/latest/download/install.
   | sudo sh -s -- upgrade
 ```
 
-Para actualizar una instalación del canal `dev`, usa el instalador del release rolling
-y añade `--channel dev`, como en el procedimiento anterior. Si necesitas revisar el
-script antes de actualizar, utiliza la [instalación auditable](#instalacion-auditable-opcional)
-y pasa `upgrade` al ejecutarlo.
+Para actualizar una instalación del canal `dev`, usa el instalador bootstrap del
+repositorio y añade `--channel dev`, como en el procedimiento anterior. El instalador
+consulta las releases publicas, selecciona el tag `dev-<run>-<short-sha>` mas reciente
+y verifica sus checksums antes de instalarlo. Si necesitas revisar el script antes de
+actualizar, utiliza la [instalación auditable](#instalacion-auditable-opcional) y pasa
+`upgrade` al ejecutarlo.
 
 El upgrade detiene los servicios, crea un backup local previo a la migracion, instala
 el binario y las units, ejecuta `migrate` y `verify`, comprueba salud y conserva un
@@ -416,25 +419,29 @@ Una release `stable` incluye:
 - Script de instalacion versionado.
 - Notas con migraciones y compatibilidad de agente.
 
-El canal `dev` publica los mismos artefactos en una GitHub Release rolling marcada como
-pre-release. Como los releases publicados de GitHub son inmutables, el workflow elimina
-el release `dev` anterior, mueve el tag `dev` y crea un release nuevo despues de cada CI
-exitoso sobre `main`. Puede existir una ventana breve sin assets durante ese reemplazo;
-`dev` es publico para facilitar pruebas, no tiene garantia de compatibilidad hacia
-adelante y no debe usarse con la base de datos de produccion. El binario conserva una
-version `0.0.0-dev.<run>.<short-sha>` para identificar el commit probado.
+El canal `dev` publica los mismos artefactos en una GitHub Release inmutable marcada
+como pre-release por cada CI exitoso sobre `main`. Cada release usa un tag historico
+`dev-<run>-<short-sha>` y conserva sus assets; el instalador resuelve el mas reciente
+para mantener la experiencia de canal rolling sin mover tags. `dev` es publico para
+facilitar pruebas, no tiene garantia de compatibilidad hacia adelante y no debe usarse
+con la base de datos de produccion. El binario conserva una version
+`0.0.0-dev.<run>.<short-sha>` para identificar el commit probado.
 
-Los tags `stable` son inmutables. El instalador usa `latest` o un tag estable para
-produccion y requiere `--channel dev` para seleccionar el canal rolling; no existe un
-fallback automatico desde `stable` hacia `dev`.
+No se usa un alias Git mutable para este canal: GitHub no permite reutilizar un nombre
+de tag que estuvo asociado a una release inmutable, incluso despues de eliminarla.
+Por eso el workflow conserva tags historicos y el instalador resuelve el mas reciente.
+
+Los tags `stable` y los tags historicos `dev-*` son inmutables. El instalador usa
+`latest` o un tag estable para produccion y requiere `--channel dev` para seleccionar
+el canal de desarrollo; no existe un fallback automatico desde `stable` hacia `dev`.
 
 Instalador:
 
 - Acepta `server`, `agent` y `upgrade`. El rol `server` instala también el agente local
   y lo registra sin token de UI.
-- Acepta `--channel dev` para descargar el ultimo binario del release rolling `dev`.
-  No puede combinarse con `--version`; instalaciones estables pueden seguir usando
-  `--version vX.Y.Z` para reproducibilidad.
+- Acepta `--channel dev` para resolver y descargar el ultimo binario de un release
+  historico `dev-*`. No puede combinarse con `--version`; instalaciones estables pueden
+  seguir usando `--version vX.Y.Z` para reproducibilidad.
 - Acepta `--no-start` para restore y mantenimiento offline; en ese modo instala
   artefactos y units, pero no inicia ni reinicia servicios.
 - Descarga por HTTPS y verifica checksum antes de reemplazar binario.

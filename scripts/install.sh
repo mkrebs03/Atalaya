@@ -177,6 +177,31 @@ download() {
   esac
 }
 
+resolve_dev_tag() {
+  case "$RELEASE_ROOT" in
+    file://*)
+      # Staged/offline fixtures keep the historical directory layout.
+      printf '%s\n' dev
+      return 0
+      ;;
+    https://github.com/*/releases)
+      repository=${RELEASE_ROOT#https://github.com/}
+      repository=${repository%/releases}
+      ;;
+    *)
+      die "--channel dev requires a GitHub releases base URL"
+      ;;
+  esac
+
+  releases_json="$TMP_DIR/dev-releases.json"
+  download "$releases_json" "https://api.github.com/repos/$repository/releases?per_page=100"
+  dev_tag=$(tr ',' '\n' < "$releases_json" |
+    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(dev-[0-9][0-9]*-[0-9a-fA-F][0-9a-fA-F]*\)".*/\1/p' |
+    head -n 1)
+  [ -n "$dev_tag" ] || die "no published dev release found"
+  printf '%s\n' "$dev_tag"
+}
+
 if [ -n "$ARTIFACT_DIR" ]; then
   [ -f "$ARTIFACT_DIR/$ARTIFACT_NAME" ] || die "offline artifact is missing $ARTIFACT_NAME"
   [ -f "$ARTIFACT_DIR/SHA256SUMS" ] || die "offline artifact is missing SHA256SUMS"
@@ -188,7 +213,8 @@ else
   if [ "$VERSION" = latest ]; then
     RELEASE_URL="$RELEASE_ROOT/latest/download"
   elif [ "$VERSION" = dev ]; then
-    RELEASE_URL="$RELEASE_ROOT/download/dev"
+    DEV_TAG=$(resolve_dev_tag)
+    RELEASE_URL="$RELEASE_ROOT/download/$DEV_TAG"
   else
     case "$VERSION" in
       v*) TAG=$VERSION ;;
