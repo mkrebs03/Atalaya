@@ -23,6 +23,10 @@ make install-e2e-browser
 make test-e2e
 ```
 
+Las pull requests ejecutan la validación completa (`lint`, tests, E2E y builds). Tras
+un merge, `main` ejecuta una verificación de build más breve, CodeQL vuelve a analizar
+la rama principal y el CI exitoso permite actualizar el canal `dev`.
+
 Los cambios de UI deben incluir pruebas relevantes y, cuando corresponda, actualizar
 los snapshots visuales. Los cambios de seguridad deben cubrir sesiones, CSRF,
 enrolamiento, almacenamiento de credenciales, migraciones o validación SSRF según el
