@@ -27,7 +27,7 @@ async function captureViews(
     mask: [page.locator('.host-card__seen')],
     maskColor: '#ece9df',
   })
-  await page.getByRole('link', { name: /Abrir Oracle\. Estado:/ }).click()
+  await page.getByRole('link', { name: /Abrir local-agent\. Estado:/ }).click()
   await expect(page).toHaveScreenshot(`host-detail-${suffix}.png`, {
     fullPage: true,
     mask: [page.locator('.host-detail__received')],
