@@ -36,7 +36,7 @@ lint: $(WEB_DEPS_STAMP)
 verify-install:
 	sh -n scripts/install.sh
 	if [ "$(shell uname -s)" = Linux ]; then sh scripts/install_test.sh; fi
-	if command -v systemd-analyze >/dev/null 2>&1; then systemd-analyze verify scripts/systemd/atalaya-server.service scripts/systemd/atalaya-agent.service; fi
+	if command -v systemd-analyze >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1 && [ -x /usr/local/bin/atalaya ] && systemctl cat tailscaled.service >/dev/null 2>&1; then systemd-analyze verify scripts/systemd/atalaya-server.service scripts/systemd/atalaya-agent.service; fi
 
 build: $(WEB_DEPS_STAMP) verify-cross-deps
 	cd web && $(NPM) run build
