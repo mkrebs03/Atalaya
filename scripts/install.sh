@@ -461,7 +461,7 @@ EOF
 }
 start_services() {
   case "$ROLE" in
-    server) "$SYSTEMCTL" enable --now atalaya-agent.service atalaya-server.service ;;
+    server|upgrade) "$SYSTEMCTL" enable --now atalaya-agent.service atalaya-server.service ;;
     agent) "$SYSTEMCTL" enable --now atalaya-agent.service ;;
   esac
 }
