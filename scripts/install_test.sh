@@ -55,6 +55,7 @@ FAKE_BIN_DIR="$TEST_ROOT/fake-bin"
 FAKE_BINARY="$TEST_ROOT/atalaya-fake"
 FAKE_SYSTEMCTL="$TEST_ROOT/systemctl-fake"
 SYSTEMCTL_LOG="$TEST_ROOT/systemctl.log"
+CURL_ATTEMPTS="$TEST_ROOT/curl-attempts"
 mkdir -p "$FAKE_BIN_DIR"
 cat > "$FAKE_BINARY" <<'EOF'
 #!/bin/sh
@@ -108,6 +109,15 @@ EOF
 chmod 0755 "$FAKE_SYSTEMCTL"
 cat > "$FAKE_BIN_DIR/curl" <<'EOF'
 #!/bin/sh
+count=0
+if [ -f "$ATALAYA_CURL_ATTEMPTS" ]; then
+  count=$(cat "$ATALAYA_CURL_ATTEMPTS")
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$ATALAYA_CURL_ATTEMPTS"
+if [ "$count" -lt 3 ]; then
+  exit 7
+fi
 exit 0
 EOF
 chmod 0755 "$FAKE_BIN_DIR/curl"
@@ -146,6 +156,7 @@ if ATALAYA_ROOT="$TEST_ROOT/root" \
   ATALAYA_SKIP_SYSTEM_USER=1 \
   ATALAYA_SYSTEMCTL="$FAKE_SYSTEMCTL" \
   ATALAYA_SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
+  ATALAYA_CURL_ATTEMPTS="$CURL_ATTEMPTS" \
   PATH="$FAKE_BIN_DIR:$PATH" \
   sh "$SCRIPT_DIR/install.sh" upgrade \
     --channel dev \
@@ -159,6 +170,7 @@ fi
 grep -Fqx 'enable --now atalaya-agent.service atalaya-server.service' "$SYSTEMCTL_LOG"
 test -n "$(find "$TEST_ROOT/root/var/lib/atalaya/backups" -type f -name 'pre-upgrade-*.tar.gz' -print -quit)"
 cmp "$FAKE_BINARY" "$TEST_ROOT/root/usr/local/bin/atalaya"
+test "$(cat "$CURL_ATTEMPTS")" -ge 3
 
 if ATALAYA_ROOT="$TEST_ROOT/conflict" \
   ATALAYA_DNS_NAME=oracle.example.ts.net \
