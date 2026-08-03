@@ -268,3 +268,13 @@ jobs:
             build/dev/SHA256SUMS \
             --clobber
           gh release edit "$dev_tag" --draft=false --prerelease
+      - name: Prune old dev releases
+        if: steps.freshness.outputs.publish == 'true'
+        run: |
+          keep=5
+          git tag --list 'dev-[0-9]*-[0-9a-f]*' --sort=-version:refname \
+            | tail -n "+$((keep + 1))" \
+            | while read -r old_tag; do
+                echo "pruning $old_tag"
+                gh release delete "$old_tag" --yes --cleanup-tag
+              done
