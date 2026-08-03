@@ -95,7 +95,7 @@ func (c *LinuxCollector) read(name string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("unsupported proc file")
 	}
-	f, err := os.Open(filepath.Join(c.ProcRoot, name))
+	f, err := os.Open(filepath.Join(c.ProcRoot, name)) //nolint:gosec // name is restricted to the fixed keys in limits above
 	if err != nil {
 		return nil, err
 	}

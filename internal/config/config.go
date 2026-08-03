@@ -47,7 +47,7 @@ func LoadServer(path string) (ServerConfig, error) {
 		return ServerConfig{}, fmt.Errorf("resolve server configuration path: %w", err)
 	}
 
-	contents, err := os.ReadFile(absolutePath)
+	contents, err := os.ReadFile(absolutePath) //nolint:gosec // path comes from a --config CLI flag set by the operator
 	if err != nil {
 		return ServerConfig{}, fmt.Errorf("read server configuration: %w", err)
 	}

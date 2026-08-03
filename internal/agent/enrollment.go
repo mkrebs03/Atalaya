@@ -145,7 +145,7 @@ func Enroll(ctx context.Context, options EnrollmentOptions) (string, error) {
 }
 
 func loadEnrollmentState(path string) (enrollmentState, bool, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // path is the agent's own config-derived enrollment state file, not external input
 	if errors.Is(err, os.ErrNotExist) {
 		return enrollmentState{}, false, nil
 	}

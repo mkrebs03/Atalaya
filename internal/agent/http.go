@@ -135,7 +135,7 @@ func validWarnings(w []string) bool {
 		}
 		seen[v] = true
 	}
-	return !(seen["filesystems_partial"] && seen["filesystems_unavailable"])
+	return !seen["filesystems_partial"] || !seen["filesystems_unavailable"]
 }
 func methodNotAllowed(w http.ResponseWriter) {
 	w.Header().Set("Allow", "GET")

@@ -518,9 +518,10 @@ func alertRandomSource() alerts.IDSource {
 
 func (database *Database) resolveTargetRulesTx(ctx context.Context, tx *sql.Tx, targetType, targetID string, now time.Time, reason string, random alerts.IDSource) error {
 	column := "host_id"
-	if targetType == "check" {
+	switch targetType {
+	case "check":
 		column = "check_id"
-	} else if targetType == "filesystem" {
+	case "filesystem":
 		column = "filesystem_id"
 	}
 	rows, err := tx.QueryContext(ctx, "SELECT id FROM alert_rules WHERE "+column+"=?", targetID)

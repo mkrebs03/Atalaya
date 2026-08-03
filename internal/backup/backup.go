@@ -144,7 +144,7 @@ func writeArchive(output string, manifest, config []byte, snapshot string) error
 	if err := addBytes(tarWriter, "server.yaml", config); err != nil {
 		return err
 	}
-	file, err := os.Open(snapshot)
+	file, err := os.Open(snapshot) //nolint:gosec // snapshot is an internal temp path created earlier in this function, not external input
 	if err != nil {
 		return fmt.Errorf("open SQLite snapshot for archive: %w", err)
 	}
@@ -195,7 +195,7 @@ func addBytes(writer *tar.Writer, name string, data []byte) error {
 }
 
 func sha256File(path string) (string, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // path is an internal snapshot/backup path, not external input
 	if err != nil {
 		return "", fmt.Errorf("open snapshot for checksum: %w", err)
 	}

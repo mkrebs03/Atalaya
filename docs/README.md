@@ -20,6 +20,11 @@ mantenedores y no sustituyen el contrato vigente.
 - [Roadmap](roadmap.md): alcance de la primera release y trabajo posterior.
 - [Licencia del proyecto](../LICENSE): Apache License 2.0.
 
+## Notas de mantenedores
+
+- [Auditoría de buenas prácticas de desarrollo](audit-practicas-desarrollo.md):
+  hallazgos sobre CI/CD, cobertura, lint y seguridad. No normativa.
+
 ## Precedencia
 
 Cuando dos documentos discrepan, se aplica este orden:

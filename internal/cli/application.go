@@ -432,7 +432,7 @@ func (application Application) runAgentEnrollCommand(args []string, stdout, stde
 }
 
 func readEnrollmentTokenFile(path string) ([]byte, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // path comes from a --token-file CLI flag set by the operator
 	if err != nil {
 		return nil, fmt.Errorf("open enrollment token file: %w", err)
 	}
@@ -813,12 +813,6 @@ func (application Application) runServerCommand(args []string, stdout, stderr io
 		return exitRuntime
 	}
 	return exitSuccess
-}
-
-func runServerAndCollection(ctx context.Context, runServer func(context.Context, server.Config, http.Handler) error, runCollection func(context.Context, collection.Repository) error, config server.Config, handler http.Handler, repository collection.Repository) error {
-	return runServerAndJobs(ctx, runServer, config, handler, func(runContext context.Context) error {
-		return runCollection(runContext, repository)
-	})
 }
 
 func runServerAndJobs(ctx context.Context, runServer func(context.Context, server.Config, http.Handler) error, config server.Config, handler http.Handler, jobs ...func(context.Context) error) error {

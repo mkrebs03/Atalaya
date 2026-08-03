@@ -93,7 +93,7 @@ func readPasswordWithoutEchoSignalsObserved(
 	}()
 
 	pollDescriptors := []unix.PollFd{{
-		Fd:     int32(fileDescriptor),
+		Fd:     int32(fileDescriptor), //nolint:gosec // OS file descriptors never approach int32 overflow range
 		Events: unix.POLLIN,
 	}}
 	for {

@@ -18,7 +18,7 @@ var (
 	// ErrForeignDatabase means a non-empty file is not an Atalaya database.
 	ErrForeignDatabase = errors.New("database is not an Atalaya database")
 	// ErrCorruptDatabase means Atalaya metadata or required schema is invalid.
-	ErrCorruptDatabase = errors.New("Atalaya database is corrupt")
+	ErrCorruptDatabase = errors.New("atalaya database is corrupt")
 	// ErrFutureSchema means the database was created by a newer Atalaya version.
 	ErrFutureSchema = errors.New("database schema is newer than this Atalaya version")
 	// ErrWrongMasterKey means the instance sentinel did not authenticate.
@@ -152,7 +152,7 @@ func prepareWritablePath(
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("inspect database path after preflight: %w", err)
 		}
-		file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		file, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // path is the database_path from server.yaml, set by the operator
 		if createErr != nil {
 			if errors.Is(createErr, os.ErrExist) {
 				return nil, fmt.Errorf("%w: database path appeared while opening", ErrDatabaseChanged)

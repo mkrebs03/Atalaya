@@ -450,7 +450,7 @@ func sanitizeDeliveryCode(value string) string {
 		return "delivery_failed"
 	}
 	for _, r := range value {
-		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' && r != '-' {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
 			return "delivery_failed"
 		}
 	}

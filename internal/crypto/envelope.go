@@ -118,9 +118,9 @@ func buildAdditionalData(secretType, entityID string) ([]byte, error) {
 
 	additionalData := make([]byte, 0, len(aadPrefix)+4+len(secretType)+len(entityID))
 	additionalData = append(additionalData, aadPrefix...)
-	additionalData = binary.BigEndian.AppendUint16(additionalData, uint16(len(secretType)))
+	additionalData = binary.BigEndian.AppendUint16(additionalData, uint16(len(secretType))) //nolint:gosec // bounds checked above (len <= math.MaxUint16)
 	additionalData = append(additionalData, secretType...)
-	additionalData = binary.BigEndian.AppendUint16(additionalData, uint16(len(entityID)))
+	additionalData = binary.BigEndian.AppendUint16(additionalData, uint16(len(entityID))) //nolint:gosec // bounds checked above (len <= math.MaxUint16)
 	additionalData = append(additionalData, entityID...)
 	return additionalData, nil
 }

@@ -619,13 +619,6 @@ func (database *Database) FinishScheduled(ctx context.Context, claim checks.Sche
 	return tx.Commit()
 }
 
-func errOrCommit(tx *sql.Tx, err error) error {
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func nullableIntPointer(value *int64) any {
 	if value == nil {
 		return nil

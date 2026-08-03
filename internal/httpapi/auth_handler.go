@@ -518,10 +518,10 @@ func (api *authAPI) writeSession(response http.ResponseWriter, request *http.Req
 }
 func (api *authAPI) setCookie(response http.ResponseWriter, token string, expiry time.Time) {
 	secure := api.config.Mode == startupconfig.ModeProduction
-	http.SetCookie(response, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, Expires: expiry, MaxAge: max(1, int(expiry.Sub(api.config.Clock()).Seconds()))})
+	http.SetCookie(response, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, Expires: expiry, MaxAge: max(1, int(expiry.Sub(api.config.Clock()).Seconds()))}) //nolint:gosec // HttpOnly, Secure and SameSite are set; gosec can't resolve the Secure variable
 }
 func (api *authAPI) clearCookie(response http.ResponseWriter) {
-	http.SetCookie(response, &http.Cookie{Name: sessionCookie, Path: "/", HttpOnly: true, Secure: api.config.Mode == startupconfig.ModeProduction, SameSite: http.SameSiteStrictMode, Expires: time.Unix(1, 0), MaxAge: -1})
+	http.SetCookie(response, &http.Cookie{Name: sessionCookie, Path: "/", HttpOnly: true, Secure: api.config.Mode == startupconfig.ModeProduction, SameSite: http.SameSiteStrictMode, Expires: time.Unix(1, 0), MaxAge: -1}) //nolint:gosec // HttpOnly, Secure and SameSite are set; gosec can't resolve the Secure expression
 }
 func writeJSON(response http.ResponseWriter, status int, value any) {
 	response.Header().Set("Content-Type", "application/json")

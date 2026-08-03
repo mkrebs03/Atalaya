@@ -559,8 +559,7 @@ func persistRollupBucket(ctx context.Context, tx *sql.Tx, bucket, bucketEnd, now
 		if err := rows.Scan(&hostID, &scopeID, &filesystemID, &metricKey, &minValue, &maxValue, &average, &count); err != nil {
 			return err
 		}
-		var hostScope metricSeriesDefinition
-		hostScope = metricSeriesDefinition{hostID: hostID, scopeID: scopeID, key: metricKey}
+		hostScope := metricSeriesDefinition{hostID: hostID, scopeID: scopeID, key: metricKey}
 		if filesystemID.Valid {
 			hostScope.filesystemID = &filesystemID.String
 		}

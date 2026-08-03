@@ -13,7 +13,6 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/mkrebs03/atalaya/internal/agent"
 )
@@ -160,13 +159,4 @@ func classifyNetworkError(err error) error {
 		return &PullError{Kind: FailureTLS}
 	}
 	return &PullError{Kind: FailureConnect}
-}
-
-func utcTimestamp(value string) (time.Time, bool) {
-	parsed, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil || parsed.IsZero() {
-		return time.Time{}, false
-	}
-	_, offset := parsed.Zone()
-	return parsed, offset == 0
 }
