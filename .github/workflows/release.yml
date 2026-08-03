@@ -38,7 +38,7 @@ jobs:
     steps:
       - name: Create or update release PR
         id: release
-        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.ATALAYA_RELEASE_TOKEN }}
           config-file: release-please-config.json
@@ -71,7 +71,7 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           git checkout "$GITHUB_SHA" -- internal/tailscale/compatibility_test.go
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: .tool-versions
           cache-dependency-path: go.sum
@@ -119,11 +119,11 @@ jobs:
       - name: Verify recovery target is a draft release
         if: github.event_name == 'workflow_dispatch'
         run: test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = true
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: .tool-versions
           cache-dependency-path: go.sum
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .tool-versions
           cache: npm
@@ -182,11 +182,11 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: .tool-versions
           cache-dependency-path: go.sum
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .tool-versions
           cache: npm
