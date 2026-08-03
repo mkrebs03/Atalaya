@@ -138,7 +138,7 @@ func normalizeRequest(r BootstrapRequest) (BootstrapRequest, config.AgentConfig,
 	r.AgentConfig = filepath.Clean(absConfig)
 	configCredentialPath := r.CredentialPath
 	if configCredentialPath == "" {
-		configCredentialPath = "agent-credential"
+		configCredentialPath = "agent-credential" //nolint:gosec // filename, not a credential value
 		r.CredentialPath = filepath.Join(filepath.Dir(r.AgentConfig), configCredentialPath)
 	} else {
 		if !filepath.IsAbs(r.CredentialPath) {
@@ -308,7 +308,7 @@ func createAtomic(path string, contents []byte, mode os.FileMode, verify func() 
 		}
 		return fmt.Errorf("install %s: %w", filepath.Base(path), err)
 	}
-	directory, err := os.Open(dir)
+	directory, err := os.Open(dir) //nolint:gosec // dir is derived from an operator-supplied config path
 	if err != nil {
 		return fmt.Errorf("open parent directory: %w", err)
 	}

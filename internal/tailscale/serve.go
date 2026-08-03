@@ -40,7 +40,7 @@ type Command interface {
 type execCommand struct{ path string }
 
 func (command execCommand) Run(ctx context.Context, args ...string) ([]byte, error) {
-	process := exec.CommandContext(ctx, command.path, args...)
+	process := exec.CommandContext(ctx, command.path, args...) //nolint:gosec // command.path is the admin-configured tailscale binary path, not external input
 	output, err := process.CombinedOutput()
 	if err != nil {
 		return nil, err
@@ -412,17 +412,4 @@ func sortedPorts(routes map[int]string) []int {
 
 func normalizeDNSName(value string) string {
 	return strings.ToLower(strings.TrimSuffix(value, "."))
-}
-
-/*
-Keep the route parser strict about the endpoint identity. In particular,
-`http://host:443`, another hostname, and another path must never satisfy an
-HTTPS root route merely because they share its numeric port.
-*/
-func httpsPort(address string) (int, error) {
-	route, err := parseRouteAddress(address)
-	if err != nil {
-		return 0, err
-	}
-	return route.port, nil
 }

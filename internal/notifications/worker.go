@@ -21,7 +21,7 @@ func (systemRandom) Intn(max int) int {
 	if max <= 1 {
 		return 0
 	}
-	return mathrand.IntN(max)
+	return mathrand.IntN(max) //nolint:gosec // retry jitter, not security-sensitive
 }
 
 type Worker struct {

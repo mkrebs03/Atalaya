@@ -1,0 +1,47 @@
+version: "2"
+
+run:
+  go: "1.26"
+
+linters:
+  default: standard
+  enable:
+    - gosec
+  settings:
+    gosec:
+      excludes:
+        # errcheck already covers unchecked errors, with more precise
+        # per-function control (see errcheck.exclude-functions below).
+        - G104
+    errcheck:
+      exclude-functions:
+        # Deferred cleanup: an error here is not actionable once the caller
+        # has already read what it needed (or is already unwinding on error).
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        # CLI output to stdout/stderr-backed io.Writer params; a write
+        # failure here means the terminal itself is gone.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Read-only file handles and best-effort temp-file cleanup; every
+        # write-then-close path in this codebase checks Close() explicitly
+        # on success and only ignores it on an already-failing error branch.
+        - (*os.File).Close
+        - os.Remove
+        - (io.ReadCloser).Close
+        - (*database/sql.DB).Close
+        - (*github.com/mkrebs03/atalaya/internal/database.Database).Close
+  exclusions:
+    rules:
+      # Test fixtures intentionally use relaxed file permissions, hardcoded
+      # fake credentials, and best-effort teardown Close() calls; these
+      # checks are for production code correctness, not test hygiene.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

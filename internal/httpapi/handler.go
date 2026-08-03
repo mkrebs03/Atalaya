@@ -116,7 +116,7 @@ func (handler *applicationHandler) serveIndex(response http.ResponseWriter, requ
 	if request.Method == http.MethodHead {
 		return
 	}
-	_, _ = response.Write(handler.index)
+	_, _ = response.Write(handler.index) //nolint:gosec // handler.index is the build-time embedded SPA index.html, not derived from any request
 }
 
 func isAPIPath(requestPath string) bool {

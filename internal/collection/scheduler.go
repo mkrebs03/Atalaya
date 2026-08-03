@@ -16,7 +16,7 @@ func (systemClock) Now() time.Time { return time.Now() }
 
 type systemRandom struct{}
 
-func (systemRandom) Intn(n int) int { return rand.IntN(n) }
+func (systemRandom) Intn(n int) int { return rand.IntN(n) } //nolint:gosec // scheduling jitter, not security-sensitive; IDs use crypto/rand below
 func (systemRandom) ID() (string, error) {
 	var v [16]byte
 	if _, e := cryptorand.Read(v[:]); e != nil {

@@ -146,7 +146,7 @@ func enrichHosts(ctx context.Context, tx *sql.Tx, items []hostquery.HostDetail) 
 		args[i] = items[i].ID
 	}
 	in := strings.Join(placeholders, ",")
-	rows, err := tx.QueryContext(ctx, `SELECT host_id,address FROM host_snapshot_addresses WHERE host_id IN (`+in+`) ORDER BY host_id,address`, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT host_id,address FROM host_snapshot_addresses WHERE host_id IN (`+in+`) ORDER BY host_id,address`, args...) //nolint:gosec // in is a fixed count of "?" placeholders, values are bound via args
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func enrichHosts(ctx context.Context, tx *sql.Tx, items []hostquery.HostDetail) 
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT host_id,code FROM host_snapshot_warnings WHERE host_id IN (`+in+`) ORDER BY host_id,code`, args...)
+	rows, err = tx.QueryContext(ctx, `SELECT host_id,code FROM host_snapshot_warnings WHERE host_id IN (`+in+`) ORDER BY host_id,code`, args...) //nolint:gosec // in is a fixed count of "?" placeholders, values are bound via args
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func enrichHosts(ctx context.Context, tx *sql.Tx, items []hostquery.HostDetail) 
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT host_id,id,mount_point,used_bytes,total_bytes,used_percent FROM (SELECT host_id,id,mount_point,used_bytes,total_bytes,(100.0*used_bytes/total_bytes) used_percent,row_number() OVER(PARTITION BY host_id ORDER BY (1.0*used_bytes/total_bytes) DESC,mount_point,id) rank FROM filesystems WHERE selected=1 AND present=1 AND total_bytes>0 AND host_id IN (`+in+`)) WHERE rank=1 ORDER BY host_id`, args...)
+	rows, err = tx.QueryContext(ctx, `SELECT host_id,id,mount_point,used_bytes,total_bytes,used_percent FROM (SELECT host_id,id,mount_point,used_bytes,total_bytes,(100.0*used_bytes/total_bytes) used_percent,row_number() OVER(PARTITION BY host_id ORDER BY (1.0*used_bytes/total_bytes) DESC,mount_point,id) rank FROM filesystems WHERE selected=1 AND present=1 AND total_bytes>0 AND host_id IN (`+in+`)) WHERE rank=1 ORDER BY host_id`, args...) //nolint:gosec // in is a fixed count of "?" placeholders, values are bound via args
 	if err != nil {
 		return err
 	}

@@ -242,7 +242,7 @@ func validateWritable(
 	if err := transaction.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pageCount); err != nil {
 		return PreflightResult{}, corruptQueryError(ctx, "inspect fresh database pages", err)
 	}
-	if pageCount != 0 && !(allowFreshInitializedPage && pageCount == 1) {
+	if pageCount != 0 && (!allowFreshInitializedPage || pageCount != 1) {
 		return PreflightResult{}, ErrForeignDatabase
 	}
 	return PreflightResult{State: StateFresh}, nil

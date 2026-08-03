@@ -29,6 +29,7 @@ lint: $(WEB_DEPS_STAMP)
 		unformatted="$$($(GO)fmt -l $$files)"; \
 		test -z "$$unformatted" || { echo "Go files require gofmt:"; echo "$$unformatted"; exit 1; }
 	CGO_ENABLED=0 $(GO) vet $(GO_PACKAGES)
+	CGO_ENABLED=0 $(GO) tool golangci-lint run ./cmd/... ./internal/...
 	$(GO) mod tidy -diff
 	$(GO) mod verify
 	$(MAKE) verify-install

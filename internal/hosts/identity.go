@@ -29,7 +29,7 @@ func EncodeIdentityV1(kind IdentityKind, first, mountRoot, mountPoint string) ([
 		if !utf8.ValidString(field) || uint64(len(field)) > math.MaxUint32 {
 			return nil, fmt.Errorf("%w: field is not encodable", ErrInvalidIdentity)
 		}
-		encoded = binary.BigEndian.AppendUint32(encoded, uint32(len(field)))
+		encoded = binary.BigEndian.AppendUint32(encoded, uint32(len(field))) //nolint:gosec // bounds checked above (len <= math.MaxUint32)
 		encoded = append(encoded, field...)
 	}
 	return encoded, nil
